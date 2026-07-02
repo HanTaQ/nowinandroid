@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 1 课：用 Now in Android 建立现代 Android 学习地图</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 1 课：建立学习地图</h1>
+  <p class="lede">这一课的目标很小：你先不急着钻进每个细节，而是知道接下来怎样用 Now in Android 学会现代 Android 应用的五个核心能力。</p>
+
+  <h2>学习顺序</h2>
+  <div class="path">
+    <h3>1. Architecture：先追一条真实用户路径</h3>
+    <p>从 <code>For You</code> 页面开始，追踪 <code>ForYouScreen</code>、<code>ForYouViewModel</code>、<code>GetUserNewsResourcesUseCase</code>、repository、Room/DataStore/network。你会先学会 UDF、Flow、UI state、offline-first。</p>
+
+    <h3>2. Modularization：再看代码为什么放在这些模块里</h3>
+    <p>对照 <code>settings.gradle.kts</code> 和各模块 README，理解 <code>app</code>、<code>feature:*:api</code>、<code>feature:*:impl</code>、<code>core:*</code> 的边界。重点不是记模块名，而是判断“新代码应该放哪里”。</p>
+
+    <h3>3. Testing：用测试反推可测试架构</h3>
+    <p>先读 <code>ForYouViewModelTest</code>，再读 repository tests、Compose UI tests、Roborazzi screenshot tests。你会看到官方示例如何用 test doubles 替代 mock-heavy 测试。</p>
+
+    <h3>4. UI：把 Compose 组件分层读</h3>
+    <p>从 feature screen 到 <code>core:ui</code> 再到 <code>core:designsystem</code>。重点是 state hoisting、Material 3、adaptive layout、theme、navigation 的组织方式。</p>
+
+    <h3>5. Performance：最后学习如何拿证据优化</h3>
+    <p>读 <code>benchmarks</code>、<code>baseline-prof.txt</code>、Compose compiler metrics 配置。目标是知道启动、重组、稳定性和关键路径分别该用什么工具观察。</p>
+  </div>
+
+  <h2>12 次学习安排</h2>
+  <section class="grid">
+    <article class="card"><span class="tag">01</span><h3>项目总览</h3><p>读 README、运行 demoDebug，画出你看到的主要页面。</p></article>
+    <article class="card"><span class="tag">02</span><h3>For You 数据流</h3><p>追踪 UI -> ViewModel -> use case -> repository 的读路径。</p></article>
+    <article class="card"><span class="tag">03</span><h3>Offline-first 数据层</h3><p>读 repository、DAO、network data source、sync worker。</p></article>
+    <article class="card"><span class="tag">04</span><h3>UI state 与事件</h3><p>读 sealed UI state、StateFlow、lambda event handlers。</p></article>
+    <article class="card"><span class="tag">05</span><h3>模块边界</h3><p>对照 module graph 判断功能代码和共享代码应该放哪里。</p></article>
+    <article class="card"><span class="tag">06</span><h3>Navigation 边界</h3><p>理解 feature api module 如何暴露导航 key。</p></article>
+    <article class="card"><span class="tag">07</span><h3>ViewModel 测试</h3><p>用 test repository 和 Turbine/Flow 思路验证 UI state。</p></article>
+    <article class="card"><span class="tag">08</span><h3>Data layer 测试</h3><p>读 repository tests、DataStore tests、Room DAO tests。</p></article>
+    <article class="card"><span class="tag">09</span><h3>Compose UI 测试</h3><p>读 screen tests 和 semantics/test tag 的使用。</p></article>
+    <article class="card"><span class="tag">10</span><h3>Design system</h3><p>读 <code>NiaTheme</code>、按钮、导航、主题和截图测试。</p></article>
+    <article class="card"><span class="tag">11</span><h3>Adaptive UI</h3><p>读不同屏幕尺寸下的导航与布局策略。</p></article>
+    <article class="card"><span class="tag">12</span><h3>性能闭环</h3><p>读 Macrobenchmark、Baseline Profile、Compose metrics。</p></article>
+  </section>
+
+  <h2>现在就做的小练习</h2>
+  <ol class="checklist">
+    <li>打开 <a href="../../README.md">README.md</a>，只读 Architecture、Testing、UI、Performance 四段。</li>
+    <li>打开 <a href="../../docs/ArchitectureLearningJourney.md">ArchitectureLearningJourney.md</a>，找到 “Displaying news on the For You screen”。</li>
+    <li>在代码里搜索 <code>ForYouViewModel</code>、<code>GetUserNewsResourcesUseCase</code>、<code>OfflineFirstNewsRepository</code>，把它们按调用方向写下来。</li>
+    <li>对照 <a href="../reference/modern-android-map.html">速查地图</a>，用自己的话回答：Now in Android 为什么把数据流设计成“data flows up, events flow down”？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>本节主资源：<a href="../../docs/ArchitectureLearningJourney.md">Architecture Learning Journey</a>。如果某个概念卡住，直接问我，我会用当前仓库里的代码给你拆开讲。</p>
+</main>
+</body>
+</html>

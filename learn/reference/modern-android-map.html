@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Now in Android 学习速查地图</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>Now in Android 学习速查地图</h1>
+  <p class="lede">把项目拆成五个反复回看的坐标：Architecture、Modularization、Testing、UI、Performance。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Architecture</span>
+      <h2>一条数据路径</h2>
+      <p><code>ForYouScreen</code> -> <code>ForYouViewModel</code> -> <code>GetUserNewsResourcesUseCase</code> -> <code>NewsRepository</code> + <code>UserDataRepository</code> -> Room/DataStore/Network。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Modularization</span>
+      <h2>一个依赖方向</h2>
+      <p><code>app</code> 组装功能；<code>feature:*:api</code> 暴露导航入口；<code>feature:*:impl</code> 实现屏幕；<code>core:*</code> 提供共享能力。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Testing</span>
+      <h2>一种测试判断</h2>
+      <p>ViewModel 用 test repositories；data layer 用 fake DAO/network；Compose screen 用 Compose test；视觉回归用 Roborazzi；跨 Activity 流程用 instrumented tests。</p>
+    </article>
+    <article class="card">
+      <span class="tag">UI</span>
+      <h2>三层 UI 结构</h2>
+      <p>Design system 定义基础组件和主题；core UI 放可复用业务组件；feature screen 组合 state、events 和 navigation。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Performance</span>
+      <h2>两个性能证据</h2>
+      <p><code>benchmarks</code> 用 Macrobenchmark 测启动和关键路径；<code>baseline-prof.txt</code> 让 release 构建提前编译关键路径。</p>
+    </article>
+  </section>
+</main>
+</body>
+</html>
