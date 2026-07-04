@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compose 与 Flow 源码阅读速查</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>Compose 与 Flow 源码阅读速查</h1>
+  <p class="lede">读 Now in Android 时，先把这些词当成路标。源码里的复杂片段通常只是这些路标的组合。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Compose State</span>
+      <h2>数据变，UI 重画</h2>
+      <p>Compose 是 declarative UI：UI 函数接收 state，state 变化后触发 recomposition。ViewModel 通常暴露 <code>StateFlow&lt;UiState&gt;</code>，Screen 用 <code>collectAsStateWithLifecycle()</code> 转成 Compose 可观察的 state。</p>
+    </article>
+    <article class="card">
+      <span class="tag">State Hoisting</span>
+      <h2>状态下传，事件上传</h2>
+      <p>组件接收 <code>value</code> 和 <code>onValueChange</code>，自己不保存业务状态。Now in Android 里常见形态是 <code>isSelected</code> 下传，<code>onClick(topicId, checked)</code> 上传。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Modifier</span>
+      <h2>修饰也是布局逻辑</h2>
+      <p><code>Modifier</code> 可以改变尺寸、布局、外观、输入和语义。链式顺序有意义，越靠前越先包住后面的节点。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Constraints</span>
+      <h2>父组件给范围</h2>
+      <p>Compose 布局不是“想多大就多大”。父组件给子组件 min/max width/height 约束，子组件在约束内测量自己。<code>heightIn(max = ...)</code> 就是在给高度设置上限。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Dp vs Sp</span>
+      <h2>尺寸与字体缩放</h2>
+      <p><code>dp</code> 主要用于布局尺寸；<code>sp</code> 会跟随用户字体大小缩放。<code>with(LocalDensity.current) { 240.sp.toDp() }</code> 是把“字体缩放后的 240sp 高度”转换成布局可用的 dp。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Flow.combine</span>
+      <h2>多个来源合成状态</h2>
+      <p><code>combine(a, b) { latestA, latestB -&gt; uiState }</code> 会取每个 Flow 的最新值，合成一个新 Flow。任意一个来源更新，都会重新计算 UI state。</p>
+    </article>
+    <article class="card">
+      <span class="tag">stateIn</span>
+      <h2>冷流变热状态</h2>
+      <p><code>stateIn(viewModelScope, started, initialValue)</code> 把 cold Flow 转成 <code>StateFlow</code>，让 UI 随时能读到最后一个值，并且需要一个初始状态。</p>
+    </article>
+  </section>
+</main>
+</body>
+</html>

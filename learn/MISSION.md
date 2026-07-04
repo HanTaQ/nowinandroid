@@ -8,12 +8,14 @@
 - 能解释 `app`、`feature:*:api`、`feature:*:impl`、`core:*`、`sync:*`、`benchmarks` 的职责边界。
 - 能为 ViewModel、repository、Compose UI、截图测试和仪器测试选择合适的测试方式。
 - 能读懂 Now in Android 的 Compose UI 结构、设计系统、主题、适配布局和 Navigation 组织方式。
+- 能把读源码时遇到的 Compose layout、state、modifier、Flow、StateFlow 等基础概念拆开理解，而不是只靠猜。
 - 能说明 Baseline Profile、Macrobenchmark、Compose compiler metrics 在性能优化中的位置。
 
 ## Constraints
 - 以当前仓库 `D:\T5Migration\NowInAndroid` 为主要教材，优先读真实代码和官方文档。
 - 每次学习聚焦一个小主题，并配一个可完成的小练习，避免一次性铺太多概念。
-- 主要使用中文讲解，关键 Android/Kotlin/Gradle 术语保留英文名称。
+- 主要使用中文讲解，关键 Android/Kotlin/Gradle/Compose/Flow 术语保留英文名称。
+- 遇到 Compose 或 Kotlin Flow 源码卡点时，先补必要的体系知识，再回到 Now in Android 的架构主线。
 
 ## Out of scope
 - 暂不把 Now in Android 改造成另一个业务 App。

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 2 课：读懂 For You 里的 Compose Modifier 与 Flow combine</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 2 课：读懂两个卡点</h1>
+  <p class="lede">这一课先解决两个真实源码片段：<code>heightIn(max = max(...))</code> 和 <code>combine(...)</code>。它们分别代表 Compose layout 体系和 Kotlin Flow 状态组合体系。</p>
+
+  <h2>卡点一：LazyHorizontalGrid 为什么要 heightIn</h2>
+  <p>源码位置：<code>feature/foryou/impl/.../ForYouScreen.kt</code> 的 <code>TopicSelection</code>。</p>
+
+  <pre><code>Modifier
+    .heightIn(max = max(240.dp, with(LocalDensity.current) { 240.sp.toDp() }))
+    .fillMaxWidth()
+    .testTag(topicSelectionTestTag)</code></pre>
+
+  <p>先把这行翻译成人话：这个横向网格的高度不要超过“240dp”和“按当前字体缩放后的 240sp”两者中更大的那个。</p>
+
+  <div class="grid">
+    <article class="card">
+      <span class="tag">为什么要限制高度</span>
+      <p><code>LazyHorizontalGrid</code> 是横向滚动网格。它需要知道自己在垂直方向最多能占多少空间，否则内部三行 item 无法稳定测量。</p>
+    </article>
+    <article class="card">
+      <span class="tag">为什么不是固定 240dp</span>
+      <p>用户可能把系统字体调大。topic 文本会变高。如果固定 240dp，大字体下文字可能放不下。</p>
+    </article>
+    <article class="card">
+      <span class="tag">为什么用 240sp.toDp()</span>
+      <p><code>sp</code> 会受字体缩放影响。把 <code>240sp</code> 转成 <code>dp</code> 后，就得到“当前字体设置下，需要给文字预留的布局高度”。</p>
+    </article>
+  </div>
+
+  <p>所以这行代码的意图是：普通字体时最多 240dp；大字体时最多给到更高的空间。它是在为 accessibility 和 adaptive UI 留余量。</p>
+
+  <h2>卡点二：combine 怎么生成 onboardingUiState</h2>
+  <p>源码位置：<code>feature/foryou/impl/.../ForYouViewModel.kt</code>。</p>
+
+  <pre><code>combine(
+    shouldShowOnboarding,
+    getFollowableTopics(),
+) { shouldShowOnboarding, topics -&gt;
+    if (shouldShowOnboarding) {
+        OnboardingUiState.Shown(topics = topics)
+    } else {
+        OnboardingUiState.NotShown
+    }
+}</code></pre>
+
+  <p>这段代码的读法是：我有两个会随时间变化的数据来源，一个告诉我“要不要显示 onboarding”，另一个告诉我“可关注 topic 列表是什么”。只要其中任意一个更新，就用两个来源的最新值重新算出一个 <code>OnboardingUiState</code>。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">来源 A</span>
+      <h3>shouldShowOnboarding</h3>
+      <p>来自用户数据。用户没有关闭过 onboarding 时，它是 <code>true</code>。</p>
+    </article>
+    <article class="card">
+      <span class="tag">来源 B</span>
+      <h3>getFollowableTopics()</h3>
+      <p>来自 use case。它把 topic 数据和用户已关注状态合成 <code>List&lt;FollowableTopic&gt;</code>。</p>
+    </article>
+    <article class="card">
+      <span class="tag">输出</span>
+      <h3>OnboardingUiState</h3>
+      <p>如果需要显示，就输出 <code>Shown(topics)</code>；否则输出 <code>NotShown</code>。</p>
+    </article>
+  </section>
+
+  <p>后面接的 <code>stateIn(..., initialValue = OnboardingUiState.Loading)</code> 是为了把这个 Flow 变成 UI 可以稳定收集的 <code>StateFlow</code>。在两个来源还没都发出值之前，UI 先看到 <code>Loading</code>。</p>
+
+  <h2>新的学习安排</h2>
+  <ol class="checklist">
+    <li>每读一个 feature screen，先标出三个东西：输入 state、输出 event、内部临时 UI state。</li>
+    <li>遇到 <code>Modifier</code>，先问：它在改尺寸、位置、外观、点击行为，还是测试语义？</li>
+    <li>遇到 <code>Flow</code> 链，先问：数据来源是什么、何时重新发出、最后变成什么 UI state？</li>
+    <li>遇到 <code>stateIn</code>，先看三个参数：scope、started、initialValue。</li>
+  </ol>
+
+  <h2>练习</h2>
+  <p>回到 <code>ForYouScreen.kt</code>，用自己的话解释这三个参数：<code>rows = GridCells.Fixed(3)</code>、<code>items(key = { it.topic.id })</code>、<code>onClick = onTopicCheckedChanged</code>。如果解释不顺，下一节就从 Lazy Grid 和 state hoisting 继续拆。</p>
+
+  <h2>主要阅读</h2>
+  <p>主资源中文精读：<a href="../reference/compose-state-layout-flow-reading-zh.html">Compose State、布局约束与 Flow combine</a>。原始资料：<a href="https://developer.android.com/develop/ui/compose/layouts/constraints-modifiers">Compose constraints and modifier order</a>、<a href="https://developer.android.com/develop/ui/compose/state">Compose state</a>、<a href="https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/combine.html">Kotlin Flow combine</a>。速查表：<a href="../reference/compose-flow-reading-map.html">Compose 与 Flow 源码阅读速查</a>。</p>
+
+  <p class="quiet">卡住时直接问我，把代码片段贴出来就行。我们会优先用 Now in Android 的真实源码讲清楚。</p>
+</main>
+</body>
+</html>

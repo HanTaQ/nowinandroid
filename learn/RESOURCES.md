@@ -14,6 +14,18 @@
   官方模块化原则。用来理解模块边界、依赖方向、构建速度和团队协作取舍。
 - [Jetpack Compose documentation](https://developer.android.com/jetpack/compose)
   UI 主资源。用来学习 Compose state、layout、Material 3、testing 和性能注意事项。
+- [Compose state documentation](https://developer.android.com/develop/ui/compose/state)
+  用来补足 Compose 状态管理、recomposition、state hoisting、Flow 到 Compose State 的基础词汇。
+- [Compose modifiers documentation](https://developer.android.com/develop/ui/compose/modifiers)
+  用来理解 `Modifier` 链、尺寸、padding、modifier 顺序，以及源码里的 layout 写法。
+- [Compose constraints and modifier order](https://developer.android.com/develop/ui/compose/layouts/constraints-modifiers)
+  用来理解 `heightIn`、`sizeIn`、父子约束、测量和布局阶段。
+- [Compose lazy lists and lazy grids](https://developer.android.com/develop/ui/compose/lists)
+  用来理解 `LazyVerticalStaggeredGrid`、`LazyHorizontalGrid`、`items`、`key` 等列表/网格 API。
+- [Kotlin Flow combine API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/combine.html)
+  用来理解多个 Flow 如何组合为一个 UI state Flow。
+- [Kotlin Flow stateIn API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/state-in.html)
+  用来理解 ViewModel 里为什么把 cold Flow 转成 `StateFlow`，以及 `initialValue` 的意义。
 - [Android testing documentation](https://developer.android.com/training/testing)
   测试主资源。用来对照本项目的 unit tests、instrumented tests、Hilt test doubles、Roborazzi screenshot tests。
 - [Macrobenchmark overview](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-overview)

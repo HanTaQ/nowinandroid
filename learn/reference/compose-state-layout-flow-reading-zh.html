@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 2 课主阅读中文精读：Compose State、布局约束与 Flow combine</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 2 课主阅读中文精读</h1>
+  <p class="lede">这不是三篇英文文档的逐句机翻，而是面向 Now in Android 源码阅读的中文精读版。目标是读懂 <code>ForYouScreen.kt</code> 和 <code>ForYouViewModel.kt</code> 中常见的 Compose 与 Flow 写法。</p>
+
+  <h2>原始资料</h2>
+  <ul>
+    <li><a href="https://developer.android.com/develop/ui/compose/layouts/constraints-modifiers">Compose constraints and modifier order</a></li>
+    <li><a href="https://developer.android.com/develop/ui/compose/state">Compose state</a></li>
+    <li><a href="https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/combine.html">Kotlin Flow combine</a></li>
+    <li><a href="https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/state-in.html">Kotlin Flow stateIn</a></li>
+  </ul>
+
+  <h2>1. Compose State：UI 是 state 的函数</h2>
+  <p>Compose 是 declarative UI。你不直接命令某个 View 改文字、改颜色、隐藏或显示；你把新的 state 传给 composable，Compose 重新执行相关 composable，也就是 recomposition，然后根据新的 state 生成新的 UI。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">核心句</span>
+      <h3>state 变，UI 重新计算</h3>
+      <p>Composable 要更新，必须显式收到新的 state。普通可变对象如果不是 Compose 可观察的 state，改了也不一定触发 recomposition。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Now in Android</span>
+      <h3>ViewModel 暴露 StateFlow</h3>
+      <p><code>ForYouViewModel</code> 暴露 <code>onboardingUiState</code>、<code>feedState</code>、<code>isSyncing</code>。这些是 UI 可以订阅的状态来源。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Compose 入口</span>
+      <h3>collectAsStateWithLifecycle</h3>
+      <p><code>ForYouScreen</code> 使用 <code>collectAsStateWithLifecycle()</code> 把 Flow/StateFlow 转成 Compose 可观察的 state，并且会跟随 Android lifecycle 安全收集。</p>
+    </article>
+  </section>
+
+  <h3>读源码口诀</h3>
+  <p>看到 <code>val x by viewModel.xxx.collectAsStateWithLifecycle()</code>，就读成：UI 正在订阅 ViewModel 的某个状态；这个状态一变化，相关 UI 会重新组合。</p>
+
+  <h2>2. State hoisting：状态下传，事件上传</h2>
+  <p>State hoisting 是 Compose 中让组件更可复用、更容易测试的常见模式。它把组件内部状态移到调用者那里，让组件尽量 stateless。</p>
+
+  <pre><code>value: T
+onValueChange: (T) -&gt; Unit</code></pre>
+
+  <p>在 Now in Android 中，它常常长这样：</p>
+
+  <pre><code>SingleTopicButton(
+    isSelected = it.isFollowed,
+    onClick = onTopicCheckedChanged,
+)</code></pre>
+
+  <p><code>SingleTopicButton</code> 不自己决定 topic 是否被关注。它只显示 <code>isSelected</code>，用户点击后把事件交给外层。外层最终调用 ViewModel，ViewModel 更新 repository，repository 的 Flow 再发出新数据，UI 收到新 state 后重新显示。</p>
+
+  <h2>3. Compose 布局约束：父组件给范围，子组件在范围内测量</h2>
+  <p>Compose layout 可以粗略理解为三步：先测量 children，再决定自己的 size，最后放置 children。父组件测量子组件时，会给子组件一组 constraints，也就是最小/最大宽高范围。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Constraints</span>
+      <h3>不是想多大就多大</h3>
+      <p>子组件只能在父组件传下来的 min/max width/height 范围内选择自己的尺寸。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Modifier</span>
+      <h3>会改约束</h3>
+      <p>有些 modifier 只改外观或语义；有些 modifier 会改变测量约束，例如 <code>size</code>、<code>heightIn</code>、<code>widthIn</code>、<code>fillMaxWidth</code>。</p>
+    </article>
+    <article class="card">
+      <span class="tag">顺序</span>
+      <h3>链式顺序有意义</h3>
+      <p>Modifier 是一层层包住 layout node。前面的 modifier 会影响后面的测量、绘制或输入行为，所以顺序不是随便写的。</p>
+    </article>
+  </section>
+
+  <h3>回到 ForYouScreen.kt</h3>
+  <pre><code>Modifier
+    .heightIn(max = max(240.dp, with(LocalDensity.current) { 240.sp.toDp() }))
+    .fillMaxWidth()
+    .testTag(topicSelectionTestTag)</code></pre>
+
+  <p>这段 modifier 的读法：</p>
+  <ul>
+    <li><code>heightIn(max = ...)</code>：给这个 <code>LazyHorizontalGrid</code> 的高度设置上限。</li>
+    <li><code>fillMaxWidth()</code>：宽度尽量占满父组件允许的最大宽度。</li>
+    <li><code>testTag(...)</code>：给 UI 测试提供查找节点的标签，不影响布局尺寸。</li>
+  </ul>
+
+  <p><code>LazyHorizontalGrid</code> 是横向滚动的 lazy grid。它需要在垂直方向有明确的高度边界，尤其这里还设置了 <code>rows = GridCells.Fixed(3)</code>，也就是固定三行。没有稳定高度，内部 item 的测量会很难成立。</p>
+
+  <h2>4. Dp、Sp 与 LocalDensity：为什么要 240.sp.toDp()</h2>
+  <p><code>dp</code> 通常用于布局尺寸，<code>sp</code> 通常用于文字尺寸，并且会受到用户系统字体缩放影响。Compose 中如果要把 <code>sp</code> 换算成 <code>dp</code>，需要当前环境的 density 和 fontScale，这个环境由 <code>LocalDensity.current</code> 提供。</p>
+
+  <pre><code>with(LocalDensity.current) {
+    240.sp.toDp()
+}</code></pre>
+
+  <p>这里的意思是：在当前屏幕密度和字体缩放环境中，把 <code>240sp</code> 转成布局可用的 <code>dp</code>。<code>240.sp</code> 是要转换的值，<code>LocalDensity.current</code> 是转换所需的环境。</p>
+
+  <p>所以这句：</p>
+
+  <pre><code>max(240.dp, with(LocalDensity.current) { 240.sp.toDp() })</code></pre>
+
+  <p>可以读成：高度上限至少是 <code>240dp</code>；如果用户把字体调大，那就按字体缩放后的高度给更多空间。这是在照顾 accessibility。</p>
+
+  <h2>5. Flow combine：多个来源，合成一个 UI state</h2>
+  <p><code>combine</code> 的作用是把多个 Flow 的最新值拿出来，通过一个 transform 函数合成新的 Flow。它通常要等每个上游 Flow 至少发出一个值，才有足够的“最新值”进行第一次合成。之后任意一个上游更新，都会重新执行 transform。</p>
+
+  <pre><code>combine(
+    shouldShowOnboarding,
+    getFollowableTopics(),
+) { shouldShowOnboarding, topics -&gt;
+    if (shouldShowOnboarding) {
+        OnboardingUiState.Shown(topics = topics)
+    } else {
+        OnboardingUiState.NotShown
+    }
+}</code></pre>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Flow A</span>
+      <h3>shouldShowOnboarding</h3>
+      <p>来自用户数据。它表达“用户是否还应该看到 onboarding”。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Flow B</span>
+      <h3>getFollowableTopics()</h3>
+      <p>来自 use case。它表达“当前可关注 topic 列表，以及每个 topic 是否已关注”。</p>
+    </article>
+    <article class="card">
+      <span class="tag">输出 Flow</span>
+      <h3>OnboardingUiState</h3>
+      <p>ViewModel 不把两个 Flow 原样丢给 UI，而是合成 UI 更容易渲染的 sealed state。</p>
+    </article>
+  </section>
+
+  <p>这就是 Now in Android UI layer 的典型写法：ViewModel 把领域数据转换成页面状态，Compose 根据页面状态渲染。</p>
+
+  <h2>6. stateIn：把 cold Flow 变成 UI 可读的 StateFlow</h2>
+  <p>Flow 默认常常是 cold 的：有人 collect 时才开始工作。UI 层更希望拿到一个“随时能读当前值”的状态容器，因此 ViewModel 会用 <code>stateIn</code> 把 Flow 转成 <code>StateFlow</code>。</p>
+
+  <pre><code>.stateIn(
+    scope = viewModelScope,
+    started = SharingStarted.WhileSubscribed(5_000),
+    initialValue = OnboardingUiState.Loading,
+)</code></pre>
+
+  <ul>
+    <li><code>scope</code>：在哪个协程作用域里共享这个状态。ViewModel 中通常用 <code>viewModelScope</code>。</li>
+    <li><code>started</code>：什么时候开始/停止收集上游。<code>WhileSubscribed(5_000)</code> 表示有订阅者时收集，订阅者消失后延迟一段时间再停止。</li>
+    <li><code>initialValue</code>：在上游还没发出值之前，UI 先看到什么状态。这里是 <code>Loading</code>。</li>
+  </ul>
+
+  <h2>7. 读 Now in Android 源码时怎么用</h2>
+  <ol class="checklist">
+    <li>看到 <code>collectAsStateWithLifecycle()</code>：找 ViewModel 暴露的 Flow/StateFlow。</li>
+    <li>看到 <code>combine</code>：列出每个输入 Flow，再写出输出 UI state。</li>
+    <li>看到 <code>stateIn</code>：看初始状态、共享策略、作用域。</li>
+    <li>看到 <code>Modifier</code>：逐个判断它影响尺寸、位置、绘制、点击、滚动、语义还是测试。</li>
+    <li>看到 <code>heightIn</code>、<code>widthIn</code>、<code>sizeIn</code>：问它在给子组件设置什么约束。</li>
+    <li>看到 <code>LocalDensity</code>：通常是在做 dp、sp、px 之间的换算。</li>
+  </ol>
+
+  <h2>小练习</h2>
+  <p>回到 <code>ForYouScreen.kt</code>，只看 <code>TopicSelection</code>。请用一句话解释每个点：</p>
+  <ul>
+    <li><code>rememberLazyGridState()</code> 为什么需要 remember？</li>
+    <li><code>rows = GridCells.Fixed(3)</code> 为什么意味着需要稳定高度？</li>
+    <li><code>items(key = { it.topic.id })</code> 的 key 在列表更新时保护了什么？</li>
+    <li><code>onClick(topicId, !isSelected)</code> 为什么不是组件自己改状态？</li>
+  </ul>
+
+  <p class="quiet">下一次如果继续读 For You，我们可以从这四个问题开始，把 Lazy Grid、remember、key、state hoisting 再拆一层。</p>
+</main>
+</body>
+</html>
