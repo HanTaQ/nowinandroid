@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 3 课：TopicSelection 的状态、身份与事件</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 3 课：TopicSelection 的状态、身份与事件</h1>
+  <p class="lede">这一课只读一个 composable：<code>TopicSelection</code>。目标是把 <code>rememberLazyGridState</code>、<code>items(key)</code>、<code>onClick</code> 放到同一个思维模型里。</p>
+
+  <h2>这段代码在做什么</h2>
+  <pre><code>@Composable
+private fun TopicSelection(
+    onboardingUiState: OnboardingUiState.Shown,
+    onTopicCheckedChanged: (String, Boolean) -&gt; Unit,
+    modifier: Modifier = Modifier,
+) {
+    val lazyGridState = rememberLazyGridState()
+
+    LazyHorizontalGrid(
+        state = lazyGridState,
+        rows = GridCells.Fixed(3),
+    ) {
+        items(
+            items = onboardingUiState.topics,
+            key = { it.topic.id },
+        ) {
+            SingleTopicButton(
+                name = it.topic.name,
+                topicId = it.topic.id,
+                isSelected = it.isFollowed,
+                onClick = onTopicCheckedChanged,
+            )
+        }
+    }
+}</code></pre>
+
+  <h2>1. rememberLazyGridState：保留滚动状态</h2>
+  <p><code>rememberLazyGridState()</code> 创建并记住一个 <code>LazyGridState</code>。这个 state 主要保存 lazy grid 的滚动位置、滚动偏移等 UI 层临时状态。</p>
+
+  <div class="card">
+    <span class="tag">读法</span>
+    <p>这个 state 属于“屏幕交互状态”，不是业务状态。它不用进 ViewModel，因为它不代表用户关注了哪些 topic，只代表这个网格当前滚到哪里。</p>
+  </div>
+
+  <p>如果不 <code>remember</code>，每次 recomposition 都可能重新创建 state，滚动位置就容易被重置。用 <code>remember</code> 后，同一个 composable 位置在重组时会继续使用之前的 state 对象。</p>
+
+  <h2>2. items(key)：给列表 item 一个稳定身份</h2>
+  <p><code>key = { it.topic.id }</code> 的重点不是 RecyclerView 那种 ViewHolder 回收，而是告诉 Compose：每个 topic item 的稳定身份是 <code>topic.id</code>。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">没有 key</span>
+      <h3>按位置猜</h3>
+      <p>如果列表从 <code>A, B, C</code> 变成 <code>X, A, B, C</code>，Compose 更容易按位置理解变化：第 0、1、2 项都变了。</p>
+    </article>
+    <article class="card">
+      <span class="tag">有 key</span>
+      <h3>按身份对齐</h3>
+      <p>Compose 知道 <code>A</code> 还是 <code>A</code>，<code>B</code> 还是 <code>B</code>，只是位置移动了。这样能更好地保留对应 item 的 composition 和内部状态。</p>
+    </article>
+  </section>
+
+  <p>在这个项目里，topic 的名字、图片、是否关注都可能变化；用 <code>topic.id</code> 做 key，可以让 UI 更新时更稳定地把“旧 item 的身份”对应到“新列表中的同一个 topic”。</p>
+
+  <h2>3. onClick：组件不私自改业务状态</h2>
+  <p><code>SingleTopicButton</code> 只接收当前是否选中：</p>
+
+  <pre><code>isSelected = it.isFollowed</code></pre>
+
+  <p>点击时，它不自己保存“我现在选中了”。它只是把事件交出去：</p>
+
+  <pre><code>onClick(topicId, !isSelected)</code></pre>
+
+  <p>这个事件一路回到 <code>ForYouViewModel.updateTopicSelection(topicId, isChecked)</code>，再由 ViewModel 写入 repository。之后 repository / use case 发出新的数据，<code>onboardingUiState</code> 更新，UI 再拿到新的 <code>isFollowed</code>。</p>
+
+  <h2>把三者连起来</h2>
+  <ol class="checklist">
+    <li><code>rememberLazyGridState</code> 保存 UI 交互状态：网格滚动到哪里。</li>
+    <li><code>items(key)</code> 保存列表身份关系：哪个 item 对应哪个 topic。</li>
+    <li><code>onClick</code> 把业务事件交给上层：topic 是否关注由数据层回流决定。</li>
+  </ol>
+
+  <h2>练习</h2>
+  <p>只看 <code>SingleTopicButton</code>，回答下面三个问题：</p>
+  <ol class="checklist">
+    <li><code>Surface(selected = isSelected)</code> 和 <code>NiaIconToggleButton(checked = isSelected)</code> 为什么都读同一个 <code>isSelected</code>？</li>
+    <li><code>onClick = { onClick(topicId, !isSelected) }</code> 和 <code>onCheckedChange = { checked -&gt; onClick(topicId, checked) }</code> 有什么差别？</li>
+    <li>如果 <code>SingleTopicButton</code> 内部自己写 <code>var selected by remember { mutableStateOf(false) }</code>，会和 Now in Android 的架构冲突在哪里？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="../reference/compose-state-layout-flow-reading-zh.html">Compose State、布局约束与 Flow combine 中文精读</a>。配合速查：<a href="../reference/compose-flow-reading-map.html">Compose 与 Flow 源码阅读速查</a>。</p>
+
+  <p class="quiet">下一步我们会从 <code>SingleTopicButton</code> 进入 state hoisting 的细节，然后再回到 <code>ForYouViewModel</code> 看事件如何变成新的 <code>OnboardingUiState</code>。</p>
+</main>
+</body>
+</html>

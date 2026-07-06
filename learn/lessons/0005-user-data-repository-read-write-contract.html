@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 5 课：UserDataRepository 的读流与写命令</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 5 课：UserDataRepository 的读流与写命令</h1>
+  <p class="lede">这一课读懂 <code>UserDataRepository</code> 的 API 形状：为什么它同时有 <code>val userData: Flow&lt;UserData&gt;</code> 和一组 <code>suspend fun set...</code>。</p>
+
+  <h2>先校正一个 Kotlin 点</h2>
+  <pre><code>interface UserDataRepository {
+    val userData: Flow&lt;UserData&gt;
+    suspend fun setTopicIdFollowed(followedTopicId: String, followed: Boolean)
+}</code></pre>
+
+  <p><code>val userData</code> 在 Kotlin interface 里不是“接口里存了一个变量”。它声明的是一个只读属性契约：任何实现 <code>UserDataRepository</code> 的类，都必须提供一个可以读取的 <code>userData</code> 属性。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Kotlin</span>
+      <h3>属性是访问器契约</h3>
+      <p><code>val userData</code> 可以理解成要求实现类提供一个 getter。它不等于接口自己持有字段。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Java 对比</span>
+      <h3>更像 getUserData()</h3>
+      <p>如果用 Java 思维理解，它接近一个 <code>Flow&lt;UserData&gt; getUserData()</code> 方法，而不是接口里的普通成员变量。</p>
+    </article>
+  </section>
+
+  <h2>读：持续观察 UserData</h2>
+  <pre><code>val userData: Flow&lt;UserData&gt;</code></pre>
+
+  <p>这表示 user data 是一个会随时间变化的数据流。调用者不是“拿一次当前值就完了”，而是订阅它：当 followed topics、bookmarks、theme、onboarding 状态变化时，新的 <code>UserData</code> 会继续发出来。</p>
+
+  <div class="card">
+    <span class="tag">在 For You 里</span>
+    <p><code>ForYouViewModel</code> 通过 <code>userDataRepository.userData.map { !it.shouldHideOnboarding }</code> 得到 <code>shouldShowOnboarding</code>。用户状态变化后，onboarding UI 会自动重新计算。</p>
+  </div>
+
+  <h2>写：一次性发出修改命令</h2>
+  <pre><code>suspend fun setTopicIdFollowed(
+    followedTopicId: String,
+    followed: Boolean,
+)</code></pre>
+
+  <p>写操作是一次性的命令，所以它是 function。它可能访问磁盘 DataStore，也可能做日志记录，因此是 <code>suspend</code>。</p>
+
+  <p>在实现类里，它长这样：</p>
+
+  <pre><code>override suspend fun setTopicIdFollowed(followedTopicId: String, followed: Boolean) {
+    niaPreferencesDataSource.setTopicIdFollowed(followedTopicId, followed)
+    analyticsHelper.logTopicFollowToggled(followedTopicId, followed)
+}</code></pre>
+
+  <p>Repository 不只是转发：它把数据写入 <code>NiaPreferencesDataSource</code>，同时记录 analytics。这就是 repository 作为数据层公共 API 的价值。</p>
+
+  <h2>真正的 source of truth：DataStore</h2>
+  <pre><code>override val userData: Flow&lt;UserData&gt; =
+    niaPreferencesDataSource.userData</code></pre>
+
+  <p><code>OfflineFirstUserDataRepository</code> 的 <code>userData</code> 直接来自 <code>NiaPreferencesDataSource.userData</code>。再往下看，<code>NiaPreferencesDataSource</code> 从 Proto DataStore 读取 <code>UserPreferences</code>，并映射成 app 使用的 <code>UserData</code>。</p>
+
+  <pre><code>val userData = userPreferences.data
+    .map {
+        UserData(
+            bookmarkedNewsResources = it.bookmarkedNewsResourceIdsMap.keys,
+            viewedNewsResources = it.viewedNewsResourceIdsMap.keys,
+            followedTopics = it.followedTopicIdsMap.keys,
+            shouldHideOnboarding = it.shouldHideOnboarding,
+            ...
+        )
+    }</code></pre>
+
+  <p>这意味着 UI state 不是凭空来的，它最终来自 DataStore 中持久化的用户偏好。</p>
+
+  <h2>为什么 Topic 里没有 isFollowed</h2>
+  <p>你第 4 课第 2 题已经答对：<code>Topic</code> 是内容数据，来自 topics 表；<code>followedTopics</code> 是用户偏好，来自 user data。它们属于不同数据源。</p>
+
+  <pre><code>FollowableTopic(
+    topic = topic,
+    isFollowed = topic.id in userData.followedTopics,
+)</code></pre>
+
+  <p>所以 <code>isFollowed</code> 不是 topic 自己的属性，而是 “topic + 当前用户数据” 组合后的结果。这就是 <code>GetFollowableTopicsUseCase</code> 存在的原因。</p>
+
+  <h2>读写分离的形状</h2>
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Read</span>
+      <h3>Flow</h3>
+      <p><code>val userData: Flow&lt;UserData&gt;</code> 用于持续观察状态变化。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Write</span>
+      <h3>suspend fun</h3>
+      <p><code>setTopicIdFollowed(...)</code> 用于发出一次修改命令。</p>
+    </article>
+    <article class="card">
+      <span class="tag">Loop</span>
+      <h3>写完再读回来</h3>
+      <p>写操作更新 DataStore，DataStore 的 Flow 发出新值，ViewModel 再生成新的 UI state。</p>
+    </article>
+  </section>
+
+  <h2>练习</h2>
+  <p>打开 <code>NiaPreferencesDataSource.kt</code>，只看 <code>setTopicIdFollowed</code>，回答：</p>
+  <ol class="checklist">
+    <li>当 <code>followed = true</code> 时，DataStore 里发生了什么？</li>
+    <li>当 <code>followed = false</code> 时，DataStore 里发生了什么？</li>
+    <li><code>updateShouldHideOnboardingIfNecessary()</code> 为什么只在没有 followed topics 和 authors 时把 <code>shouldHideOnboarding</code> 设回 false？</li>
+    <li>如果 <code>setTopicIdFollowed</code> 不更新 DataStore，只改 ViewModel 里的内存变量，应用重启后会怎样？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="../../docs/ArchitectureLearningJourney-zh.md#数据层">架构学习旅程中文版：数据层</a>。源码入口：<code>UserDataRepository.kt</code>、<code>OfflineFirstUserDataRepository.kt</code>、<code>NiaPreferencesDataSource.kt</code>。</p>
+</main>
+</body>
+</html>

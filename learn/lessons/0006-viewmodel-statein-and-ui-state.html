@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 6 课：ForYouViewModel 里的 stateIn 与 UI state</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 6 课：ForYouViewModel 里的 stateIn 与 UI state</h1>
+  <p class="lede">这一课从 DataStore 回到 ViewModel：为什么 Now in Android 把 repository/use case 的 Flow 转成 <code>StateFlow</code>，以及 <code>stateIn</code> 的三个参数怎么读。</p>
+
+  <h2>先看 ViewModel 暴露了哪些状态</h2>
+  <section class="grid">
+    <article class="card">
+      <span class="tag">onboarding</span>
+      <h3>onboardingUiState</h3>
+      <p>表示 onboarding 是否加载中、是否显示、显示哪些 topics。</p>
+    </article>
+    <article class="card">
+      <span class="tag">feed</span>
+      <h3>feedState</h3>
+      <p>表示新闻 feed 是 loading，还是已经有 <code>UserNewsResource</code> 列表。</p>
+    </article>
+    <article class="card">
+      <span class="tag">sync</span>
+      <h3>isSyncing</h3>
+      <p>表示后台同步是否正在进行，用于控制顶部 loading indicator。</p>
+    </article>
+    <article class="card">
+      <span class="tag">deep link</span>
+      <h3>deepLinkedNewsResource</h3>
+      <p>表示通过 deep link 打开的新闻资源，处理完后会清空。</p>
+    </article>
+  </section>
+
+  <h2>为什么要 StateFlow</h2>
+  <p>UI 需要的是“随时能读到当前值”的状态。普通 Flow 更像是一条数据管道，collect 时才开始工作；<code>StateFlow</code> 更像一个持续更新的状态容器，有当前值，可以被 Compose 安全收集。</p>
+
+  <pre><code>val onboardingUiState: StateFlow&lt;OnboardingUiState&gt; =
+    combine(
+        shouldShowOnboarding,
+        getFollowableTopics(),
+    ) { shouldShowOnboarding, topics -&gt;
+        if (shouldShowOnboarding) {
+            OnboardingUiState.Shown(topics = topics)
+        } else {
+            OnboardingUiState.NotShown
+        }
+    }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = OnboardingUiState.Loading,
+        )</code></pre>
+
+  <h2>stateIn 的三个参数</h2>
+  <section class="grid">
+    <article class="card">
+      <span class="tag">scope</span>
+      <h3>viewModelScope</h3>
+      <p>这个共享状态的生命周期跟 ViewModel 绑定。ViewModel 清理时，相关协程也会取消。</p>
+    </article>
+    <article class="card">
+      <span class="tag">started</span>
+      <h3>WhileSubscribed(5_000)</h3>
+      <p>有 UI 订阅时开始收集上游；UI 暂时停止订阅后，延迟 5 秒再停止，避免配置变化等短暂停顿导致立刻重启上游。</p>
+    </article>
+    <article class="card">
+      <span class="tag">initialValue</span>
+      <h3>Loading / false / null</h3>
+      <p>上游 Flow 还没发出第一个值时，UI 先看到一个合理的初始状态。</p>
+    </article>
+  </section>
+
+  <h2>不同状态的 initialValue</h2>
+  <ul>
+    <li><code>onboardingUiState</code> 初始为 <code>OnboardingUiState.Loading</code>，因为 topics/userData 还没组合出来。</li>
+    <li><code>feedState</code> 初始为 <code>NewsFeedUiState.Loading</code>，因为新闻 feed 还没加载出来。</li>
+    <li><code>isSyncing</code> 初始为 <code>false</code>，因为默认先认为没有同步中。</li>
+    <li><code>deepLinkedNewsResource</code> 初始为 <code>null</code>，因为默认没有 deep link 新闻。</li>
+  </ul>
+
+  <h2>stateIn 和测试</h2>
+  <p><code>ForYouViewModelTest</code> 里多次出现：</p>
+
+  <pre><code>backgroundScope.launch(UnconfinedTestDispatcher()) {
+    viewModel.onboardingUiState.collect()
+}</code></pre>
+
+  <p>这是因为 <code>stateIn</code> 使用了 <code>SharingStarted.WhileSubscribed</code>。如果没有订阅者，上游 Flow 可能不会开始收集。测试里主动 collect，等于模拟 UI 正在订阅这个 state。</p>
+
+  <h2>读源码口诀</h2>
+  <ol class="checklist">
+    <li>看到 <code>map(...).stateIn(...)</code>：一个数据源转换成 UI state。</li>
+    <li>看到 <code>combine(...).stateIn(...)</code>：多个数据源合成 UI state。</li>
+    <li>看到 <code>initialValue</code>：问 UI 在第一批数据到来前应该显示什么。</li>
+    <li>看到 <code>WhileSubscribed</code>：问这个状态什么时候开始/停止收集上游。</li>
+  </ol>
+
+  <h2>练习</h2>
+  <p>打开 <code>ForYouViewModel.kt</code>，回答：</p>
+  <ol class="checklist">
+    <li><code>feedState</code> 为什么只需要 <code>map(NewsFeedUiState::Success)</code>，而 <code>onboardingUiState</code> 需要 <code>combine</code>？</li>
+    <li><code>onboardingUiState</code> 的 <code>initialValue</code> 为什么是 <code>Loading</code>，而不是 <code>NotShown</code>？</li>
+    <li>为什么 <code>ForYouScreen</code> 中要用 <code>collectAsStateWithLifecycle()</code> 收集这些 StateFlow？</li>
+    <li>测试里为什么要主动 <code>viewModel.onboardingUiState.collect()</code>？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="../reference/compose-state-layout-flow-reading-zh.html">Compose State、布局约束与 Flow combine 中文精读</a>。源码入口：<code>ForYouViewModel.kt</code>、<code>ForYouViewModelTest.kt</code>。</p>
+</main>
+</body>
+</html>

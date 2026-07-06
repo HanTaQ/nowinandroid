@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 4 课：一次 topic 点击如何变成新的 UI state</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 4 课：一次 topic 点击如何变成新的 UI state</h1>
+  <p class="lede">这一课把第 3 课的 <code>onClick</code> 往下追：用户点击 topic 后，事件如何写入 repository，又如何通过 Flow 回到 <code>ForYouScreen</code>。</p>
+
+  <h2>先看完整路径</h2>
+  <div class="path">
+    <p><code>SingleTopicButton</code> 触发点击事件</p>
+    <p><code>TopicSelection</code> 把事件交给 <code>onTopicCheckedChanged</code></p>
+    <p><code>ForYouScreen</code> 连接到 <code>viewModel::updateTopicSelection</code></p>
+    <p><code>ForYouViewModel</code> 调用 <code>userDataRepository.setTopicIdFollowed(topicId, isChecked)</code></p>
+    <p><code>UserDataRepository.userData</code> 发出新的 <code>UserData</code></p>
+    <p><code>GetFollowableTopicsUseCase</code> 用新的 <code>UserData</code> 重新计算 <code>FollowableTopic</code></p>
+    <p><code>ForYouViewModel.onboardingUiState</code> 重新发出 <code>Shown(topics)</code></p>
+    <p><code>ForYouScreen</code> recomposition，新的 <code>isSelected</code> 传回 <code>SingleTopicButton</code></p>
+  </div>
+
+  <h2>1. UI 只发事件</h2>
+  <pre><code>Surface(
+    selected = isSelected,
+    onClick = {
+        onClick(topicId, !isSelected)
+    },
+)</code></pre>
+
+  <p><code>SingleTopicButton</code> 读 <code>isSelected</code> 来显示当前 UI，但它不把新的 selected 状态存在自己内部。点击发生时，它只说：“这个 topic 想切到另一个 checked 状态”。</p>
+
+  <h2>2. ViewModel 处理事件</h2>
+  <pre><code>fun updateTopicSelection(topicId: String, isChecked: Boolean) {
+    viewModelScope.launch {
+        userDataRepository.setTopicIdFollowed(topicId, isChecked)
+    }
+}</code></pre>
+
+  <p>这里有两个值得注意的点：</p>
+  <ul>
+    <li>写入 repository 是 suspend 操作，所以放进 <code>viewModelScope.launch</code>。</li>
+    <li>ViewModel 没有直接改某个 Compose state，而是改数据源，让数据流自己回到 UI。</li>
+  </ul>
+
+  <h2>3. Repository 暴露 userData Flow</h2>
+  <pre><code>interface UserDataRepository {
+    val userData: Flow&lt;UserData&gt;
+    suspend fun setTopicIdFollowed(followedTopicId: String, followed: Boolean)
+}</code></pre>
+
+  <p>这个接口同时提供 read stream 和 write function。读是持续的 <code>Flow&lt;UserData&gt;</code>，写是一次性的 suspend function。Now in Android 很多数据层接口都采用这种形状。</p>
+
+  <h2>4. Use case 把 UserData 和 Topics 合成 FollowableTopic</h2>
+  <pre><code>operator fun invoke(): Flow&lt;List&lt;FollowableTopic&gt;&gt; = combine(
+    userDataRepository.userData,
+    topicsRepository.getTopics(),
+) { userData, topics -&gt;
+    topics.map { topic -&gt;
+        FollowableTopic(
+            topic = topic,
+            isFollowed = topic.id in userData.followedTopics,
+        )
+    }
+}</code></pre>
+
+  <p>这一步非常关键：topic 本身来自 topics repository；“是否关注”来自 user data。Use case 把两者组合成 UI 更容易使用的 <code>FollowableTopic</code>。</p>
+
+  <h2>5. ViewModel 再合成 OnboardingUiState</h2>
+  <pre><code>combine(
+    shouldShowOnboarding,
+    getFollowableTopics(),
+) { shouldShowOnboarding, topics -&gt;
+    if (shouldShowOnboarding) {
+        OnboardingUiState.Shown(topics = topics)
+    } else {
+        OnboardingUiState.NotShown
+    }
+}</code></pre>
+
+  <p>注意这里出现了第二层 <code>combine</code>。第一层 combine 在 use case 里，负责合成 <code>FollowableTopic</code>。第二层 combine 在 ViewModel 里，负责合成页面要渲染的 <code>OnboardingUiState</code>。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Use case</span>
+      <h3>业务形状</h3>
+      <p><code>Topic + UserData -&gt; FollowableTopic</code></p>
+    </article>
+    <article class="card">
+      <span class="tag">ViewModel</span>
+      <h3>页面形状</h3>
+      <p><code>shouldShow + topics -&gt; OnboardingUiState</code></p>
+    </article>
+    <article class="card">
+      <span class="tag">Compose</span>
+      <h3>渲染形状</h3>
+      <p><code>OnboardingUiState.Shown -&gt; TopicSelection</code></p>
+    </article>
+  </section>
+
+  <h2>这就是 UDF</h2>
+  <p>这一整条链就是 Now in Android 中的 unidirectional data flow：</p>
+  <ul>
+    <li>事件向下：UI -> ViewModel -> Repository/DataStore</li>
+    <li>数据向上：DataStore/Repository -> UseCase -> ViewModel UI state -> Compose UI</li>
+  </ul>
+
+  <p>所以第 3 课你说“事件交给 ViewModel，新的 UI 状态再从数据来源回来”是对的。第 4 课只是把这句话拆成可追踪的源码路径。</p>
+
+  <h2>练习</h2>
+  <p>回到源码，按顺序打开下面三个文件，并各用一句话回答问题：</p>
+  <ol class="checklist">
+    <li><code>ForYouViewModel.kt</code>：<code>updateTopicSelection</code> 为什么只写 repository，不直接改 <code>onboardingUiState</code>？</li>
+    <li><code>GetFollowableTopicsUseCase.kt</code>：为什么 <code>FollowableTopic.isFollowed</code> 不能只从 <code>Topic</code> 里拿？</li>
+    <li><code>UserDataRepository.kt</code>：为什么接口同时有 <code>val userData: Flow&lt;UserData&gt;</code> 和 <code>suspend fun setTopicIdFollowed(...)</code>？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="../../docs/ArchitectureLearningJourney-zh.md#ui-layer">架构学习旅程中文版：UI Layer</a>、<a href="../../docs/ArchitectureLearningJourney-zh.md#领域层">领域层</a>。配合第 2 课中文精读：<a href="../reference/compose-state-layout-flow-reading-zh.html">Compose State、布局约束与 Flow combine</a>。</p>
+</main>
+</body>
+</html>
