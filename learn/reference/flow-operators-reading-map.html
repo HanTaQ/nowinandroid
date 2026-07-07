@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flow 操作符源码阅读速查</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>Flow 操作符源码阅读速查</h1>
+  <p class="lede">读 Now in Android 时，先看 Flow 的“外层类型”怎么变，再看每次 emission 里面的数据怎么变。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Flow.map</span>
+      <h2>改每次发出的值</h2>
+      <p><code>Flow&lt;A&gt;.map { A -&gt; B }</code> 得到 <code>Flow&lt;B&gt;</code>。它不是遍历列表 item，除非 <code>A</code> 本身就是列表且你在 lambda 里调用 <code>list.map</code>。</p>
+    </article>
+    <article class="card">
+      <span class="tag">List.map</span>
+      <h2>改列表里的每个元素</h2>
+      <p><code>List&lt;A&gt;.map { A -&gt; B }</code> 得到 <code>List&lt;B&gt;</code>。它发生在内层集合上。</p>
+    </article>
+    <article class="card">
+      <span class="tag">combine</span>
+      <h2>多个 Flow 合成一个值</h2>
+      <p><code>combine(a, b) { latestA, latestB -&gt; C }</code> 得到 <code>Flow&lt;C&gt;</code>。任意一个上游更新，都会用最新值重新计算。</p>
+    </article>
+    <article class="card">
+      <span class="tag">flatMapLatest</span>
+      <h2>上游变，切换下游 Flow</h2>
+      <p>上游每次发出新值，就创建一个新的内部 Flow，并取消旧的内部 Flow。常用于“条件变化后重新查询”。</p>
+    </article>
+    <article class="card">
+      <span class="tag">stateIn</span>
+      <h2>Flow 变 StateFlow</h2>
+      <p>把一个 Flow 变成有当前值的 <code>StateFlow</code>。UI 更适合收集 StateFlow，因为它需要当前状态和初始状态。</p>
+    </article>
+    <article class="card">
+      <span class="tag">collect</span>
+      <h2>真正开始收集</h2>
+      <p>很多 Flow 是 cold 的。没有 collect，就不会执行上游。<code>stateIn(WhileSubscribed)</code> 也依赖是否有订阅者。</p>
+    </article>
+  </section>
+
+  <h2>读类型链</h2>
+  <pre><code>Flow&lt;List&lt;UserNewsResource&gt;&gt;
+    .map(NewsFeedUiState::Success)
+// Flow&lt;NewsFeedUiState.Success&gt;
+// 可作为 Flow&lt;NewsFeedUiState&gt; 使用</code></pre>
+
+  <p>这里的 <code>map</code> 改的是 Flow 每次发出的“整个列表”，不是列表里的每个 <code>UserNewsResource</code>。</p>
+</main>
+</body>
+</html>

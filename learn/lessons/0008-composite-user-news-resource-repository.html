@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 8 课：CompositeUserNewsResourceRepository 如何组合新闻和用户数据</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 8 课：组合新闻数据和用户数据</h1>
+  <p class="lede">这一课读 <code>CompositeUserNewsResourceRepository</code>。目标是看懂它如何把 <code>NewsResource</code> 和 <code>UserData</code> 合成 UI 需要的 <code>UserNewsResource</code>。</p>
+
+  <h2>先反馈第 7 课练习</h2>
+  <p>你的类型判断基本正确：</p>
+  <ul>
+    <li><code>userDataRepository.userData</code> 是 <code>Flow&lt;UserData&gt;</code>。</li>
+    <li><code>.map { it.followedTopics }</code> 后是 <code>Flow&lt;Set&lt;String&gt;&gt;</code>。</li>
+    <li><code>distinctUntilChanged()</code> 不改变类型，只过滤连续相同的 emission。</li>
+    <li><code>flatMapLatest</code> 根据 followed topics 切换到不同的内部 Flow，最后仍然输出 <code>Flow&lt;List&lt;UserNewsResource&gt;&gt;</code>。</li>
+  </ul>
+
+  <div class="card">
+    <span class="tag">小校正</span>
+    <p><code>distinctUntilChanged()</code> 不是改变“订阅者”，而是改变这条 Flow 往下游发出的内容：如果新的 <code>Set&lt;String&gt;</code> 和上一个连续值相等，就不继续往下发。</p>
+  </div>
+
+  <h2>1. observeAllForFollowedTopics：先根据用户关注主题决定查询</h2>
+  <pre><code>override fun observeAllForFollowedTopics(): Flow&lt;List&lt;UserNewsResource&gt;&gt; =
+    userDataRepository.userData
+        .map { it.followedTopics }
+        .distinctUntilChanged()
+        .flatMapLatest { followedTopics -&gt;
+            when {
+                followedTopics.isEmpty() -&gt; flowOf(emptyList())
+                else -&gt; observeAll(
+                    NewsResourceQuery(filterTopicIds = followedTopics)
+                )
+            }
+        }</code></pre>
+
+  <p>这段代码的意思是：用户关注的 topic 集合变化时，重新决定新闻列表来源。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">空集合</span>
+      <h3>没有关注主题</h3>
+      <p>直接返回 <code>flowOf(emptyList())</code>。没有关注主题，就没有 For You feed。</p>
+    </article>
+    <article class="card">
+      <span class="tag">非空集合</span>
+      <h3>按关注主题查询</h3>
+      <p>用 <code>NewsResourceQuery(filterTopicIds = followedTopics)</code> 查询对应主题的新闻。</p>
+    </article>
+  </section>
+
+  <h2>2. flatMapLatest：用户关注变了，就换一条新闻流</h2>
+  <p><code>flatMapLatest</code> 的读法是：上游每发出一个新的 <code>followedTopics</code>，就创建一条新的内部 Flow；如果旧的内部 Flow 还在收集，就取消旧的，只保留最新的。</p>
+
+  <pre><code>Flow&lt;Set&lt;String&gt;&gt;
+    .flatMapLatest { followedTopics -&gt;
+        Flow&lt;List&lt;UserNewsResource&gt;&gt;
+    }
+// 最终得到 Flow&lt;List&lt;UserNewsResource&gt;&gt;</code></pre>
+
+  <p>这很适合“查询条件变化后重新查询”的场景。用户关注主题变化，就是查询条件变化。</p>
+
+  <h2>3. observeAll：把 NewsResource 和 UserData combine 起来</h2>
+  <pre><code>override fun observeAll(
+    query: NewsResourceQuery,
+): Flow&lt;List&lt;UserNewsResource&gt;&gt; =
+    newsRepository.getNewsResources(query)
+        .combine(userDataRepository.userData) { newsResources, userData -&gt;
+            newsResources.mapToUserNewsResources(userData)
+        }</code></pre>
+
+  <p><code>newsRepository.getNewsResources(query)</code> 提供内容数据，<code>userDataRepository.userData</code> 提供用户状态。两者任意一个变化，都会重新计算 <code>UserNewsResource</code> 列表。</p>
+
+  <section class="grid">
+    <article class="card">
+      <span class="tag">NewsResource</span>
+      <h3>内容数据</h3>
+      <p>标题、链接、发布时间、所属 topics、图片等。</p>
+    </article>
+    <article class="card">
+      <span class="tag">UserData</span>
+      <h3>用户状态</h3>
+      <p>关注了哪些 topics、收藏了哪些新闻、看过哪些新闻。</p>
+    </article>
+    <article class="card">
+      <span class="tag">UserNewsResource</span>
+      <h3>UI 可用模型</h3>
+      <p>内容数据 + 当前用户状态，例如 <code>isSaved</code>、<code>hasBeenViewed</code>、<code>followableTopics</code>。</p>
+    </article>
+  </section>
+
+  <h2>4. mapToUserNewsResources：这里才是 List.map</h2>
+  <pre><code>fun List&lt;NewsResource&gt;.mapToUserNewsResources(
+    userData: UserData,
+): List&lt;UserNewsResource&gt; =
+    map { UserNewsResource(it, userData) }</code></pre>
+
+  <p>注意这里的 <code>map</code> 是 <code>List.map</code>，不是 <code>Flow.map</code>。它会遍历列表里的每个 <code>NewsResource</code>，生成对应的 <code>UserNewsResource</code>。</p>
+
+  <pre><code>UserNewsResource(newsResource, userData)</code></pre>
+
+  <p>构造时会计算：</p>
+  <ul>
+    <li><code>followableTopics</code>：每个 topic 是否在 <code>userData.followedTopics</code> 中。</li>
+    <li><code>isSaved</code>：新闻 id 是否在 <code>userData.bookmarkedNewsResources</code> 中。</li>
+    <li><code>hasBeenViewed</code>：新闻 id 是否在 <code>userData.viewedNewsResources</code> 中。</li>
+  </ul>
+
+  <h2>这节课的核心</h2>
+  <p><code>CompositeUserNewsResourceRepository</code> 的职责不是从网络或数据库直接取原始数据，而是把多个 repository 的数据组合成更适合 UI/use case 使用的模型。</p>
+
+  <ol class="checklist">
+    <li><code>observeAllForFollowedTopics</code> 根据用户关注主题决定查询哪些新闻。</li>
+    <li><code>observeAll</code> 把新闻内容和用户状态合成 <code>UserNewsResource</code>。</li>
+    <li><code>UserNewsResource</code> 是 UI 层更容易渲染的模型。</li>
+  </ol>
+
+  <h2>练习</h2>
+  <p>回到 <code>CompositeUserNewsResourceRepository.kt</code> 和 <code>UserNewsResource.kt</code>，回答：</p>
+  <ol class="checklist">
+    <li><code>observeAllForFollowedTopics</code> 为什么先对 <code>followedTopics</code> 做 <code>distinctUntilChanged()</code>？</li>
+    <li>如果用户关注主题从 <code>{"ui"}</code> 变成 <code>{"ui", "kotlin"}</code>，<code>flatMapLatest</code> 会发生什么？</li>
+    <li><code>observeAll</code> 为什么还要 combine <code>userDataRepository.userData</code>，即使 query 已经用过 followed topics？</li>
+    <li><code>UserNewsResource</code> 为什么比直接把 <code>NewsResource</code> 传给 UI 更方便？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="../../docs/ArchitectureLearningJourney-zh.md#数据层">架构学习旅程中文版：数据层</a>。本地速查：<a href="../reference/flow-operators-reading-map.html">Flow 操作符源码阅读速查</a>。</p>
+</main>
+</body>
+</html>

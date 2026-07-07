@@ -24,6 +24,8 @@
   用来理解 `LazyVerticalStaggeredGrid`、`LazyHorizontalGrid`、`items`、`key` 等列表/网格 API。
 - [Kotlin Flow combine API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/combine.html)
   用来理解多个 Flow 如何组合为一个 UI state Flow。
+- [Kotlin Flow guide](https://kotlinlang.org/docs/flow.html)
+  用来建立 Flow、Flow operators、cold flow、collection 的基础模型。
 - [Kotlin Flow stateIn API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/state-in.html)
   用来理解 ViewModel 里为什么把 cold Flow 转成 `StateFlow`，以及 `initialValue` 的意义。
 - [Android testing documentation](https://developer.android.com/training/testing)

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 7 课：用类型读懂 Flow 操作符</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 7 课：用类型读懂 Flow 操作符</h1>
+  <p class="lede">这一课专门解决第 6 课的卡点：<code>Flow.map</code> 和 <code>List.map</code> 不是一回事。读 Flow 链时，先写出每一步的类型，源码会立刻清楚很多。</p>
+
+  <h2>1. 先拆 feedState</h2>
+  <pre><code>val feedState: StateFlow&lt;NewsFeedUiState&gt; =
+    userNewsResourceRepository.observeAllForFollowedTopics()
+        .map(NewsFeedUiState::Success)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = NewsFeedUiState.Loading,
+        )</code></pre>
+
+  <p><code>observeAllForFollowedTopics()</code> 的返回类型是：</p>
+
+  <pre><code>Flow&lt;List&lt;UserNewsResource&gt;&gt;</code></pre>
+
+  <p>这表示这个 Flow 每次发出的值是一个完整的 <code>List&lt;UserNewsResource&gt;</code>。所以这里的 <code>map</code> 不是对列表里的每个 item 调用一次，而是对 Flow 每次发出的“整个列表”调用一次。</p>
+
+  <h2>2. Flow.map vs List.map</h2>
+  <section class="grid">
+    <article class="card">
+      <span class="tag">Flow.map</span>
+      <h3>外层变换</h3>
+      <pre><code>Flow&lt;A&gt;.map { a -&gt; b }
+// 得到 Flow&lt;B&gt;</code></pre>
+      <p>每次上游发出一个 <code>A</code>，就把它转换成一个 <code>B</code>。</p>
+    </article>
+    <article class="card">
+      <span class="tag">List.map</span>
+      <h3>内层变换</h3>
+      <pre><code>List&lt;A&gt;.map { a -&gt; b }
+// 得到 List&lt;B&gt;</code></pre>
+      <p>遍历列表里的每个元素，把每个 <code>A</code> 转成 <code>B</code>。</p>
+    </article>
+  </section>
+
+  <p>所以这段代码：</p>
+
+  <pre><code>Flow&lt;List&lt;UserNewsResource&gt;&gt;
+    .map(NewsFeedUiState::Success)</code></pre>
+
+  <p>等价于：</p>
+
+  <pre><code>Flow&lt;List&lt;UserNewsResource&gt;&gt;
+    .map { list -&gt;
+        NewsFeedUiState.Success(feed = list)
+    }</code></pre>
+
+  <p>类型变化是：</p>
+
+  <pre><code>Flow&lt;List&lt;UserNewsResource&gt;&gt;
+        ↓ map
+Flow&lt;NewsFeedUiState.Success&gt;
+        ↓ stateIn
+StateFlow&lt;NewsFeedUiState&gt;</code></pre>
+
+  <h2>3. NewsFeedUiState::Success 是什么</h2>
+  <p><code>NewsFeedUiState.Success</code> 是一个 data class：</p>
+
+  <pre><code>data class Success(
+    val feed: List&lt;UserNewsResource&gt;,
+) : NewsFeedUiState</code></pre>
+
+  <p><code>NewsFeedUiState::Success</code> 是构造函数引用。它可以当成一个函数使用：</p>
+
+  <pre><code>(List&lt;UserNewsResource&gt;) -&gt; NewsFeedUiState.Success</code></pre>
+
+  <p>因此 <code>.map(NewsFeedUiState::Success)</code> 就是把每次发出的新闻列表包进 <code>Success(feed = list)</code>。</p>
+
+  <h2>4. 为什么 feedState 不需要 combine</h2>
+  <p><code>feedState</code> 的上游已经是“当前用户关注主题对应的新闻列表”：</p>
+
+  <pre><code>observeAllForFollowedTopics(): Flow&lt;List&lt;UserNewsResource&gt;&gt;</code></pre>
+
+  <p>它只需要把列表包装成 UI state，所以用 <code>map</code> 就够了。</p>
+
+  <p><code>onboardingUiState</code> 不同，它需要两个来源：</p>
+
+  <pre><code>shouldShowOnboarding: Flow&lt;Boolean&gt;
+getFollowableTopics(): Flow&lt;List&lt;FollowableTopic&gt;&gt;</code></pre>
+
+  <p>所以它需要 <code>combine</code>。</p>
+
+  <h2>5. collectAsStateWithLifecycle 的准确读法</h2>
+  <p>你第 6 课第 3 题的方向接近，但要更精确：<code>StateFlow</code> 本身仍然属于 ViewModel；<code>collectAsStateWithLifecycle()</code> 创建的是一个跟随当前 lifecycle 收集这个 Flow 的 Compose State。</p>
+
+  <p>当 <code>ForYouScreen</code> 不在活跃生命周期时，收集会停止或暂停；它不会把 ViewModel 里的 StateFlow “关闭”。如果没有 UI 订阅，配合 <code>SharingStarted.WhileSubscribed</code>，上游收集可能在超时后停止。</p>
+
+  <h2>6. 测试里为什么要 collect</h2>
+  <p>因为 ViewModel 使用：</p>
+
+  <pre><code>SharingStarted.WhileSubscribed(5_000)</code></pre>
+
+  <p>这表示有订阅者时才收集上游。测试里没有真实 UI，所以需要主动：</p>
+
+  <pre><code>backgroundScope.launch(UnconfinedTestDispatcher()) {
+    viewModel.onboardingUiState.collect()
+}</code></pre>
+
+  <p>这相当于模拟 UI 正在订阅这个 state，让上游 Flow 链真正开始工作。</p>
+
+  <h2>练习</h2>
+  <p>只看 <code>CompositeUserNewsResourceRepository.observeAllForFollowedTopics()</code>，给每一步写出类型：</p>
+
+  <pre><code>userDataRepository.userData
+    .map { it.followedTopics }
+    .distinctUntilChanged()
+    .flatMapLatest { followedTopics -&gt;
+        when {
+            followedTopics.isEmpty() -&gt; flowOf(emptyList())
+            else -&gt; observeAll(NewsResourceQuery(filterTopicIds = followedTopics))
+        }
+    }</code></pre>
+
+  <ol class="checklist">
+    <li><code>userDataRepository.userData</code> 的类型是什么？</li>
+    <li><code>.map { it.followedTopics }</code> 之后的类型是什么？</li>
+    <li><code>distinctUntilChanged()</code> 改变类型了吗？它改变了什么？</li>
+    <li><code>flatMapLatest</code> 最后为什么得到 <code>Flow&lt;List&lt;UserNewsResource&gt;&gt;</code>？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="https://kotlinlang.org/docs/flow.html">Kotlin Flow guide</a>、<a href="https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/state-in.html">stateIn API</a>。本地速查：<a href="../reference/flow-operators-reading-map.html">Flow 操作符源码阅读速查</a>。</p>
+</main>
+</body>
+</html>

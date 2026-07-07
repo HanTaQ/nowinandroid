@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 9 课：NewsResourceQuery 如何变成新闻列表</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 9 课：NewsResourceQuery 如何变成新闻列表</h1>
+  <p class="lede">这一课只解决一个卡点：<code>NewsResourceQuery(filterTopicIds = followedTopics)</code> 到底做了什么。</p>
+
+  <h2>先反馈你的第 8 课练习</h2>
+  <ul>
+    <li>第 1 题正确：<code>distinctUntilChanged()</code> 过滤的是“连续相同”的 emission，目的是避免下游重复查询和重复计算。</li>
+    <li>第 2 题正确：<code>flatMapLatest</code> 会根据最新的 <code>followedTopics</code> 创建新的内部 Flow，并取消旧的内部 Flow。</li>
+    <li>第 4 题方向正确：<code>UserNewsResource</code> 不只是新闻内容，还带着当前用户相关状态，例如是否收藏、是否看过、topic 是否已关注。</li>
+    <li>第 3 题卡住的地方很关键：<code>NewsResourceQuery</code> 不是数据库查询本身，它只是 data 层传递查询条件的对象。</li>
+  </ul>
+
+  <h2>1. NewsResourceQuery 是“查询条件对象”</h2>
+  <p>源码在 <code>core/data/.../NewsRepository.kt</code>：</p>
+  <pre><code>data class NewsResourceQuery(
+    val filterTopicIds: Set&lt;String&gt;? = null,
+    val filterNewsIds: Set&lt;String&gt;? = null,
+)</code></pre>
+
+  <p>可以把它读成：</p>
+  <ul>
+    <li><code>filterTopicIds = null</code>：不按 topic 过滤，任何 topic 都可以。</li>
+    <li><code>filterTopicIds = setOf("compose")</code>：只要和 compose 这个 topic 相关的新闻。</li>
+    <li><code>filterNewsIds = null</code>：不按新闻 id 过滤，任何新闻 id 都可以。</li>
+    <li><code>filterNewsIds = setOf("news-1")</code>：只要指定 id 的新闻。</li>
+  </ul>
+
+  <div class="card">
+    <span class="tag">关键区别</span>
+    <p><code>null</code> 表示“不启用这个过滤条件”；空集合 <code>emptySet()</code> 表示“启用过滤，但没有任何 id 能匹配”。所以这里不能简单把 <code>null</code> 和空集合当成一回事。</p>
+  </div>
+
+  <h2>2. followedTopics 变成 query</h2>
+  <p><code>CompositeUserNewsResourceRepository</code> 里这段代码的意思是：用户关注了哪些 topic，就用这些 topic 作为新闻查询条件。</p>
+  <pre><code>userDataRepository.userData
+    .map { it.followedTopics }
+    .distinctUntilChanged()
+    .flatMapLatest { followedTopics -&gt;
+        when {
+            followedTopics.isEmpty() -&gt; flowOf(emptyList())
+            else -&gt; observeAll(
+                NewsResourceQuery(filterTopicIds = followedTopics)
+            )
+        }
+    }</code></pre>
+
+  <p>如果用户关注了 <code>{"compose", "kotlin"}</code>，这里就会创建：</p>
+  <pre><code>NewsResourceQuery(
+    filterTopicIds = setOf("compose", "kotlin"),
+    filterNewsIds = null,
+)</code></pre>
+
+  <p>到这一步，还没有真正执行 SQL。它只是把“我要按这些 topic 查新闻”表达出来。</p>
+
+  <h2>3. observeAll 把 query 交给 NewsRepository</h2>
+  <pre><code>override fun observeAll(
+    query: NewsResourceQuery,
+): Flow&lt;List&lt;UserNewsResource&gt;&gt; =
+    newsRepository.getNewsResources(query)
+        .combine(userDataRepository.userData) { newsResources, userData -&gt;
+            newsResources.mapToUserNewsResources(userData)
+        }</code></pre>
+
+  <p>这里分两步：</p>
+  <ol class="checklist">
+    <li><code>newsRepository.getNewsResources(query)</code>：按 query 拿到 <code>Flow&lt;List&lt;NewsResource&gt;&gt;</code>。</li>
+    <li><code>combine(userDataRepository.userData)</code>：再把新闻内容和用户状态合成 <code>UserNewsResource</code>。</li>
+  </ol>
+
+  <h2>4. OfflineFirstNewsRepository 把 query 翻译成 DAO 参数</h2>
+  <p>真正把 <code>NewsResourceQuery</code> 拆开的地方在 <code>OfflineFirstNewsRepository</code>：</p>
+  <pre><code>newsResourceDao.getNewsResources(
+    useFilterTopicIds = query.filterTopicIds != null,
+    filterTopicIds = query.filterTopicIds ?: emptySet(),
+    useFilterNewsIds = query.filterNewsIds != null,
+    filterNewsIds = query.filterNewsIds ?: emptySet(),
+)</code></pre>
+
+  <p>读法是：</p>
+  <ul>
+    <li>如果 <code>filterTopicIds != null</code>，就启用 topic 过滤。</li>
+    <li>如果 <code>filterTopicIds == null</code>，就不启用 topic 过滤。</li>
+    <li>传给 DAO 的集合不能是 null，所以 null 时用 <code>emptySet()</code> 占位。</li>
+  </ul>
+
+  <h2>5. DAO 才是真正的数据库查询</h2>
+  <p><code>NewsResourceDao.getNewsResources</code> 用 Room SQL 查询本地数据库：</p>
+  <pre><code>CASE WHEN :useFilterTopicIds
+    THEN id IN (
+        SELECT news_resource_id FROM news_resources_topics
+        WHERE topic_id IN (:filterTopicIds)
+    )
+    ELSE 1
+END</code></pre>
+
+  <p>这段 SQL 的意思是：</p>
+  <ul>
+    <li>如果 <code>useFilterTopicIds = true</code>，就只查和这些 topic id 关联的 news resource。</li>
+    <li>如果 <code>useFilterTopicIds = false</code>，<code>ELSE 1</code> 等价于“这一项条件永远通过”，也就是不按 topic 过滤。</li>
+  </ul>
+
+  <h2>6. 完整类型链</h2>
+  <pre><code>Flow&lt;UserData&gt;
+    -&gt; map { it.followedTopics }
+Flow&lt;Set&lt;String&gt;&gt;
+    -&gt; flatMapLatest { followedTopics -&gt;
+           observeAll(NewsResourceQuery(filterTopicIds = followedTopics))
+       }
+NewsResourceQuery
+    -&gt; newsRepository.getNewsResources(query)
+Flow&lt;List&lt;NewsResource&gt;&gt;
+    -&gt; combine(userDataRepository.userData)
+Flow&lt;List&lt;UserNewsResource&gt;&gt;</code></pre>
+
+  <p>一句话总结：<code>NewsResourceQuery</code> 是 data 层的过滤条件对象，<code>OfflineFirstNewsRepository</code> 把它翻译成 DAO 参数，<code>NewsResourceDao</code> 才真正查询数据库，最后 <code>CompositeUserNewsResourceRepository</code> 再把新闻内容和用户状态合成 UI 更好用的模型。</p>
+
+  <h2>练习</h2>
+  <p>回到 <code>NewsRepository.kt</code>、<code>OfflineFirstNewsRepository.kt</code>、<code>NewsResourceDao.kt</code>，回答：</p>
+  <ol class="checklist">
+    <li><code>filterTopicIds = null</code> 和 <code>filterTopicIds = emptySet()</code> 在语义上有什么不同？</li>
+    <li>为什么 <code>OfflineFirstNewsRepository</code> 需要额外传 <code>useFilterTopicIds</code> 给 DAO？</li>
+    <li><code>observeAllForFollowedTopics</code> 为什么在 <code>followedTopics.isEmpty()</code> 时直接返回 <code>flowOf(emptyList())</code>？</li>
+    <li>如果用户关注的 topic 变了，最终哪一层会重新执行数据库查询？</li>
+  </ol>
+</main>
+</body>
+</html>
