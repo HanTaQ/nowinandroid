@@ -35,6 +35,11 @@
 - [Baseline Profiles documentation](https://developer.android.com/studio/profile/baselineprofiles)
   性能优化主资源。用来理解 `app/src/main/baseline-prof.txt` 和 release 构建中的 profile 生成。
 
+- [Testing Kotlin flows on Android](https://developer.android.com/kotlin/flow/test)
+  Android 官方 Flow 测试指南。用于学习 fake producer、断言 `StateFlow.value`，以及测试由 `stateIn` 创建的 `StateFlow` 时为什么需要 collector。
+- [kotlinx-coroutines-test API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-test/)
+  Kotlin 官方协程测试 API。用于查询 `runTest`、`TestScope`、`TestDispatcher`、虚拟时间和 `Dispatchers.setMain`。
+
 ## Wisdom (Communities)
 
 - [Android Developers official site](https://developer.android.com/)

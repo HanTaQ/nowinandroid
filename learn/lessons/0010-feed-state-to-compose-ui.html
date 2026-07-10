@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 10 课：feedState 如何进入 Compose UI</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 10 课：feedState 如何进入 Compose UI</h1>
+  <p class="lede">这一课从 <code>ForYouViewModel.feedState</code> 继续往 UI 走，目标是看懂 <code>StateFlow</code> 如何变成 Compose 可渲染的状态。</p>
+
+  <h2>先反馈第 9 课练习</h2>
+  <ul>
+    <li>第 1 题正确：<code>null</code> 表示不启用过滤，<code>emptySet()</code> 表示启用过滤但没有可匹配 id，所以结果为空。</li>
+    <li>第 2 题正确：DAO 的 SQL 需要 <code>useFilterTopicIds</code> 这个 boolean 来决定是否进入 topic 过滤分支。</li>
+    <li>第 3 题正确：没有关注 topic 时直接返回 <code>flowOf(emptyList())</code>，可以避免一次没有意义的数据库查询。</li>
+    <li>第 4 题基本正确：当 query 对应的 Flow 被重新创建并收集时，Room DAO 的 <code>@Query</code> 会重新执行，并且后续数据库表变化也会让这个 Flow 继续发出新结果。</li>
+  </ul>
+
+  <h2>1. ViewModel 把 repository Flow 包成 UI state</h2>
+  <p><code>ForYouViewModel</code> 里：</p>
+  <pre><code>val feedState: StateFlow&lt;NewsFeedUiState&gt; =
+    userNewsResourceRepository.observeAllForFollowedTopics()
+        .map(NewsFeedUiState::Success)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = NewsFeedUiState.Loading,
+        )</code></pre>
+
+  <p>上一课已经知道：</p>
+  <pre><code>observeAllForFollowedTopics()
+// Flow&lt;List&lt;UserNewsResource&gt;&gt;</code></pre>
+
+  <p>所以这里的 <code>.map(NewsFeedUiState::Success)</code> 等价于：</p>
+  <pre><code>.map { feed: List&lt;UserNewsResource&gt; -&gt;
+    NewsFeedUiState.Success(feed)
+}</code></pre>
+
+  <div class="card">
+    <span class="tag">Kotlin 语法</span>
+    <p><code>NewsFeedUiState::Success</code> 是构造函数引用。因为 <code>Success</code> 的构造函数接收一个 <code>List&lt;UserNewsResource&gt;</code>，刚好能作为 <code>map</code> 的转换函数。</p>
+  </div>
+
+  <h2>2. NewsFeedUiState 用 sealed interface 表达有限 UI 状态</h2>
+  <p><code>core/ui/NewsFeed.kt</code> 里：</p>
+  <pre><code>sealed interface NewsFeedUiState {
+    data object Loading : NewsFeedUiState
+
+    data class Success(
+        val feed: List&lt;UserNewsResource&gt;,
+    ) : NewsFeedUiState
+}</code></pre>
+
+  <p>这里没有直接用 <code>List&lt;UserNewsResource&gt;?</code>，而是用一个 sealed hierarchy，把 UI 状态表达得更清楚：</p>
+  <ul>
+    <li><code>Loading</code>：新闻流还没加载完成。</li>
+    <li><code>Success(feed)</code>：新闻流加载完成，里面可能有很多项，也可能是空列表。</li>
+  </ul>
+
+  <p>这样 UI 写 <code>when (feedState)</code> 时，能明确处理每种状态。</p>
+
+  <h2>3. stateIn 让冷 Flow 变成 ViewModel 持有的 StateFlow</h2>
+  <p><code>stateIn</code> 在这里做三件事：</p>
+  <ol class="checklist">
+    <li>把普通 <code>Flow</code> 转成 <code>StateFlow</code>。</li>
+    <li>给 UI 一个立刻可读的初始值：<code>NewsFeedUiState.Loading</code>。</li>
+    <li>把收集工作绑定到 <code>viewModelScope</code>，让状态由 ViewModel 持有。</li>
+  </ol>
+
+  <p><code>SharingStarted.WhileSubscribed(5_000)</code> 的意思是：有订阅者时开始收集；订阅者消失后等待 5 秒再停止。这个策略适合 UI 短暂离开又回来，比如配置变化或页面切换。</p>
+
+  <h2>4. 外层 ForYouScreen 收集 ViewModel 状态</h2>
+  <p><code>feature/foryou/.../ForYouScreen.kt</code> 里有两个同名函数。外层函数负责连接 ViewModel：</p>
+  <pre><code>@Composable
+fun ForYouScreen(
+    onTopicClick: (String) -&gt; Unit,
+    modifier: Modifier = Modifier,
+    viewModel: ForYouViewModel = hiltViewModel(),
+) {
+    val onboardingUiState by viewModel.onboardingUiState.collectAsStateWithLifecycle()
+    val feedState by viewModel.feedState.collectAsStateWithLifecycle()
+    val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
+
+    ForYouScreen(
+        isSyncing = isSyncing,
+        onboardingUiState = onboardingUiState,
+        feedState = feedState,
+        onTopicCheckedChanged = viewModel::updateTopicSelection,
+        onNewsResourcesCheckedChanged = viewModel::updateNewsResourceSaved,
+        onNewsResourceViewed = { viewModel.setNewsResourceViewed(it, true) },
+        modifier = modifier,
+    )
+}</code></pre>
+
+  <p><code>collectAsStateWithLifecycle()</code> 可以读成：把 <code>StateFlow</code> 按生命周期安全地收集成 Compose <code>State</code>。当值变化时，读取这个值的 Composable 会重新组合。</p>
+
+  <h2>5. 内层 ForYouScreen 是更纯的 UI 函数</h2>
+  <p>内层函数不直接知道 ViewModel，只接收状态和事件：</p>
+  <pre><code>internal fun ForYouScreen(
+    isSyncing: Boolean,
+    onboardingUiState: OnboardingUiState,
+    feedState: NewsFeedUiState,
+    onTopicCheckedChanged: (String, Boolean) -&gt; Unit,
+    onNewsResourcesCheckedChanged: (String, Boolean) -&gt; Unit,
+    onNewsResourceViewed: (String) -&gt; Unit,
+)</code></pre>
+
+  <p>这种拆法有两个好处：</p>
+  <ul>
+    <li>外层负责状态来源：ViewModel、Hilt、Flow 收集。</li>
+    <li>内层负责 UI 渲染：给什么状态，就画什么界面；也更容易 Preview 和测试。</li>
+  </ul>
+
+  <h2>6. Loading 不在 newsFeed 里画，而是在屏幕层画</h2>
+  <p><code>newsFeed</code> 里：</p>
+  <pre><code>when (feedState) {
+    NewsFeedUiState.Loading -&gt; Unit
+    is NewsFeedUiState.Success -&gt; {
+        items(
+            items = feedState.feed,
+            key = { it.id },
+            contentType = { "newsFeedItem" },
+        ) { userNewsResource -&gt;
+            NewsResourceCardExpanded(...)
+        }
+    }
+}</code></pre>
+
+  <p><code>Loading -&gt; Unit</code> 的意思是：新闻列表这个 Lazy grid section 在 Loading 时不插入任何新闻 item。</p>
+
+  <p>真正的加载动画在屏幕层统一处理：</p>
+  <pre><code>val isFeedLoading = feedState is NewsFeedUiState.Loading
+
+AnimatedVisibility(
+    visible = isSyncing || isFeedLoading || isOnboardingLoading,
+) {
+    NiaOverlayLoadingWheel(...)
+}</code></pre>
+
+  <p>这样做的好处是：同步、onboarding、feed 三种加载状态可以共用一个顶部 loading 表达，而不是每个 section 各画各的 loading。</p>
+
+  <h2>7. 点击新闻卡片后的事件流</h2>
+  <p>在 <code>newsFeed</code> 的 <code>Success</code> 分支里，每个 <code>UserNewsResource</code> 会被渲染成 <code>NewsResourceCardExpanded</code>。点击和收藏仍然走“事件向上”的路线：</p>
+  <pre><code>onToggleBookmark = {
+    onNewsResourcesCheckedChanged(
+        userNewsResource.id,
+        !userNewsResource.isSaved,
+    )
+}</code></pre>
+
+  <p>传回外层后，最终调用：</p>
+  <pre><code>viewModel.updateNewsResourceSaved(newsResourceId, isChecked)</code></pre>
+
+  <p>然后 ViewModel 调 repository 更新用户数据。数据更新后，<code>userDataRepository.userData</code> 会发出新值，前面那条 Flow 链重新合成新的 <code>UserNewsResource</code>，UI 再重新组合。</p>
+
+  <h2>这一课的核心</h2>
+  <pre><code>Repository:
+Flow&lt;List&lt;UserNewsResource&gt;&gt;
+
+ViewModel:
+StateFlow&lt;NewsFeedUiState&gt;
+
+Compose route:
+collectAsStateWithLifecycle()
+
+Stateless UI:
+when (feedState) {
+    Loading -&gt; show no feed items
+    Success -&gt; render items
+}</code></pre>
+
+  <h2>练习</h2>
+  <p>回到 <code>ForYouViewModel.kt</code>、<code>ForYouScreen.kt</code>、<code>NewsFeed.kt</code>，用一句话回答：</p>
+  <ol class="checklist">
+    <li><code>.map(NewsFeedUiState::Success)</code> 等价于什么 lambda？</li>
+    <li><code>NewsFeedUiState.Loading</code> 和 <code>NewsFeedUiState.Success(emptyList())</code> 在语义上有什么不同？</li>
+    <li>为什么外层 <code>ForYouScreen</code> 使用 <code>collectAsStateWithLifecycle()</code>，而内层 <code>ForYouScreen</code> 只接收普通参数？</li>
+    <li><code>newsFeed</code> 里 <code>Loading -&gt; Unit</code> 为什么不会导致用户完全看不到加载状态？</li>
+  </ol>
+</main>
+</body>
+</html>

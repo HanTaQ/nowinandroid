@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ViewModel 与 Flow 测试速查</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>ViewModel 与 Flow 测试速查</h1>
+  <p class="lede">阅读 Now in Android 测试代码时，先判断测试位置、协程环境、输入控制方式和断言对象。</p>
+
+  <h2>四个核心部件</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="tag">位置</span>
+      <h3><code>src/test</code></h3>
+      <p>运行在本地 JVM，适合 ViewModel、use case、repository 等不依赖真实 Android UI 的逻辑。</p>
+    </section>
+    <section class="card">
+      <span class="tag">环境</span>
+      <h3><code>runTest</code></h3>
+      <p>提供测试协程作用域、虚拟时间和异步任务调度能力，让挂起函数与 Flow 测试可控。</p>
+    </section>
+    <section class="card">
+      <span class="tag">主线程</span>
+      <h3><code>MainDispatcherRule</code></h3>
+      <p>测试开始时替换 <code>Dispatchers.Main</code>，结束后恢复，使依赖 <code>viewModelScope</code> 的代码能在本地测试运行。</p>
+    </section>
+    <section class="card">
+      <span class="tag">断言</span>
+      <h3><code>stateFlow.value</code></h3>
+      <p>当目标是验证当前 UI 状态时，直接断言 <code>StateFlow.value</code>，不必把每次 emission 都收集成列表。</p>
+    </section>
+  </div>
+
+  <h2><code>stateIn(WhileSubscribed)</code> 的测试规则</h2>
+  <pre><code>// 只检查 initialValue：可以直接读取 value
+assertEquals(Loading, viewModel.feedState.value)
+
+// 要让 stateIn 开始收集上游：测试期间要有 collector
+backgroundScope.launch(UnconfinedTestDispatcher()) {
+    viewModel.feedState.collect()
+}
+
+fakeRepository.emit(...)
+assertEquals(expected, viewModel.feedState.value)</code></pre>
+
+  <div class="card">
+    <span class="tag">为什么</span>
+    <p><code>SharingStarted.WhileSubscribed</code> 的意思就是“有订阅者时才收集上游”。读取 <code>value</code> 只能读当前缓存值，它本身不算订阅。</p>
+  </div>
+
+  <h2>测试 collector 的两个常见部件</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="tag">生命周期</span>
+      <h3><code>backgroundScope</code></h3>
+      <p>适合运行不会自行结束的 <code>collect()</code>；测试结束时，后台协程会被自动取消。</p>
+    </section>
+    <section class="card">
+      <span class="tag">启动顺序</span>
+      <h3><code>UnconfinedTestDispatcher</code></h3>
+      <p>让 collector 立即开始执行，避免 Fake 发出数据时订阅还没有建立。</p>
+    </section>
+  </div>
+
+  <h2>多个 <code>stateIn</code> 要分别订阅</h2>
+  <pre><code>viewModel.onboardingUiState.collect() // 启动 onboarding 上游
+viewModel.feedState.collect()         // 启动 feed 上游</code></pre>
+  <p>两个 <code>StateFlow</code> 各自使用 <code>SharingStarted.WhileSubscribed</code> 时，订阅其中一个不会启动另一个。</p>
+
+  <h2>一条常见测试路径</h2>
+  <pre><code>Arrange：创建 fake 依赖和 ViewModel
+   ↓
+Collect：需要上游更新时，启动 StateFlow collector
+   ↓
+Act：让 fake repository 发出测试数据，或调用 ViewModel 事件
+   ↓
+Assert：读取 StateFlow.value，与期望 UI state 比较</code></pre>
+
+  <h2>多上游状态的检查顺序</h2>
+  <pre><code>1. 给每个 Flow 标出元素类型
+2. 找出 map / combine 后的输出类型
+3. 确认每个 combine 的上游是否都已发出首个值
+4. 确认目标 stateIn 是否有 collector
+5. 最后预测 StateFlow.value</code></pre>
+  <p><code>combine</code> 只有在每个上游至少发出一个值后，才能执行 transformation。测试某个状态仍为 <code>Loading</code> 时，优先检查是否缺少上游首值或 collector。</p>
+
+  <h2>项目中的入口</h2>
+  <ul>
+    <li><code>feature/foryou/impl/src/test/.../ForYouViewModelTest.kt</code></li>
+    <li><code>core/testing/.../MainDispatcherRule.kt</code></li>
+    <li><code>core/testing/.../TestUserDataRepository.kt</code></li>
+  </ul>
+
+  <p class="quiet">相关课程：<a href="../lessons/0011-first-viewmodel-state-test.html">第 11 课：读懂第一条 ViewModel 状态测试</a>。遇到不清楚的测试语法，可以直接把具体代码片段交给老师逐行拆解。</p>
+</main>
+</body>
+</html>

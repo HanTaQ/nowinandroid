@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 11 课：读懂第一条 ViewModel 状态测试</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 11 课：读懂第一条 ViewModel 状态测试</h1>
+  <p class="lede">你已经追完了 feed 状态进入 UI 的路径。现在从最短的一条测试开始，验证 ViewModel 是否向 UI 提供了正确的初始状态。</p>
+
+  <h2>先补清第 10 课第 4 题</h2>
+  <p><code>ForYouScreen</code> 的主体是一个 <code>Box</code>。<code>Box</code> 可以把多个并列子项放在同一块区域中，后声明的子项可以画在前面子项的上方：</p>
+  <pre><code>Box {
+    LazyVerticalStaggeredGrid { ... } // 第 1 层：页面列表内容
+    AnimatedVisibility { ... }       // 第 2 层：顶部加载提示
+    DraggableScrollbar(...)          // 第 3 层：滚动条
+}</code></pre>
+
+  <p>因此，所谓“屏幕层”并不是一个 Compose API 名称，而是描述这段 UI 的职责：加载提示由整个 <code>ForYouScreen</code> 统一绘制，不属于 <code>newsFeed</code> 这个列表 section。</p>
+
+  <pre><code>val isFeedLoading = feedState is NewsFeedUiState.Loading
+
+AnimatedVisibility(
+    visible = isSyncing || isFeedLoading || isOnboardingLoading,
+) {
+    NiaOverlayLoadingWheel(...)
+}</code></pre>
+
+  <p><code>||</code> 是逻辑“或”。三个条件只要有一个是 <code>true</code>，<code>visible</code> 就是 <code>true</code>，加载提示会通过进入动画显示；全部为 <code>false</code> 时，它通过退出动画隐藏。</p>
+
+  <p>所以当 <code>feedState</code> 是 <code>Loading</code> 时，会同时发生两件事：</p>
+  <ol class="checklist">
+    <li><code>newsFeed</code> 的 <code>Loading -&gt; Unit</code> 不向 Lazy grid 添加新闻卡片。</li>
+    <li><code>isFeedLoading</code> 为 <code>true</code>，外层 <code>AnimatedVisibility</code> 显示 <code>NiaOverlayLoadingWheel</code>。</li>
+  </ol>
+
+  <div class="card">
+    <span class="tag">一句话模型</span>
+    <p><code>newsFeed</code> 决定“列表里有没有新闻卡片”，外层 <code>AnimatedVisibility</code> 决定“页面上方有没有加载提示”。</p>
+  </div>
+
+  <h2>本课目标：读懂最短的 ViewModel 测试</h2>
+  <p>打开 <code>feature/foryou/impl/src/test/.../ForYouViewModelTest.kt</code>，先只看这一条：</p>
+  <pre><code>@Test
+fun stateIsInitiallyLoading() = runTest {
+    assertEquals(
+        OnboardingUiState.Loading,
+        viewModel.onboardingUiState.value,
+    )
+    assertEquals(
+        NewsFeedUiState.Loading,
+        viewModel.feedState.value,
+    )
+}</code></pre>
+
+  <h2>1. 这条测试验证什么</h2>
+  <p>它验证 <code>ForYouViewModel</code> 刚创建、repository 还没有提供数据时，onboarding 和 feed 都处于 <code>Loading</code>。这正是第 10 课在 UI 中使用的两个加载条件。</p>
+
+  <p>测试名称可以按行为读成：</p>
+  <pre><code>state Is Initially Loading
+状态  在初始时    是加载中</code></pre>
+
+  <h2>2. ViewModel 在哪里创建</h2>
+  <p><code>@Before</code> 标记的方法会在每条测试运行前执行：</p>
+  <pre><code>@Before
+fun setup() {
+    viewModel = ForYouViewModel(
+        syncManager = syncManager,
+        savedStateHandle = savedStateHandle,
+        analyticsHelper = analyticsHelper,
+        userDataRepository = userDataRepository,
+        userNewsResourceRepository = userNewsResourceRepository,
+        getFollowableTopics = getFollowableTopicsUseCase,
+    )
+}</code></pre>
+
+  <p>这里注入的是测试依赖。测试不会启动真实 App，也不会要求用户点击 UI；它直接创建被测的 <code>ForYouViewModel</code>。</p>
+
+  <h2>3. 为什么需要 <code>MainDispatcherRule</code></h2>
+  <pre><code>@get:Rule
+val mainDispatcherRule = MainDispatcherRule()</code></pre>
+
+  <p><code>viewModelScope</code> 默认依赖主线程 dispatcher，但本地 JVM 测试没有 Android 主线程。这个 rule 在测试开始时用 <code>TestDispatcher</code> 替换 <code>Dispatchers.Main</code>，测试结束后再恢复。</p>
+
+  <h2>4. <code>runTest</code> 提供什么</h2>
+  <p><code>runTest</code> 为协程测试提供 <code>TestScope</code> 和可控制的调度环境。后面的测试会在这里启动 collector、调用 suspend 函数，并控制尚未完成的异步任务。本条测试虽然只读取初始值，但沿用相同测试结构。</p>
+
+  <h2>5. 为什么这条测试没有调用 <code>collect()</code></h2>
+  <p><code>stateIn(..., initialValue = Loading)</code> 创建 <code>StateFlow</code> 时，初始值已经可以通过 <code>.value</code> 立即读取。这条测试只验证初始值，不要求它从 repository 接收新数据，因此不需要启动 collector。</p>
+
+  <p>下一条测试若要验证 repository 发出数据后的状态，就不同了。由于代码使用 <code>SharingStarted.WhileSubscribed</code>，测试期间必须至少存在一个 collector，<code>stateIn</code> 才会开始收集上游：</p>
+  <pre><code>backgroundScope.launch(UnconfinedTestDispatcher()) {
+    viewModel.feedState.collect()
+}</code></pre>
+
+  <p>先记住区别即可：</p>
+  <div class="grid">
+    <section class="card">
+      <span class="tag">初始值</span>
+      <p>只检查 <code>initialValue</code>：直接断言 <code>StateFlow.value</code>。</p>
+    </section>
+    <section class="card">
+      <span class="tag">上游更新</span>
+      <p>要接收 repository 后续 emission：先启动 collector，再制造输入并断言。</p>
+    </section>
+  </div>
+
+  <h2>练习</h2>
+  <p>只阅读 <code>ForYouViewModelTest.stateIsInitiallyLoading()</code>、<code>setup()</code> 和 <code>MainDispatcherRule</code>，用自己的话回答：</p>
+  <ol class="checklist">
+    <li>这条测试属于本地测试还是设备测试？你从文件路径的哪一部分判断？</li>
+    <li><code>@Before setup()</code> 为什么要在每条测试前重新创建 <code>ForYouViewModel</code>？</li>
+    <li><code>MainDispatcherRule</code> 在测试开始和结束时分别做什么？</li>
+    <li>为什么 <code>stateIsInitiallyLoading()</code> 不启动 collector，也能断言 <code>feedState.value</code>？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="https://developer.android.com/kotlin/flow/test#statein">Android Developers：Testing Kotlin flows on Android</a> 中的 “Working with StateFlows created by stateIn”。速查：<a href="../reference/viewmodel-flow-testing-zh.html">ViewModel 与 Flow 测试速查</a>。上一课：<a href="0010-feed-state-to-compose-ui.html">feedState 如何进入 Compose UI</a>。</p>
+
+  <p class="quiet">先完成上面四题。遇到 <code>Rule</code>、<code>runTest</code> 或 dispatcher 不清楚的地方，可以直接把疑问交给老师；下一课再实际追踪一条 fake repository 发出数据后的状态测试。</p>
+</main>
+</body>
+</html>

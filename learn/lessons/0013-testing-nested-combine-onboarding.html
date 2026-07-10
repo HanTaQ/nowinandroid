@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 13 课：测试两层 combine 生成 Onboarding 状态</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 13 课：测试两层 combine 生成 Onboarding 状态</h1>
+  <p class="lede">上一课故意缺少 topics，所以 Onboarding 停在 Loading。本课补齐两个上游的首个值，观察 use case 与 ViewModel 中的两层 <code>combine</code> 如何生成 <code>Shown</code>。</p>
+
+  <h2>第 12 课反馈</h2>
+  <p>四题全部正确。你已经可以从 collector、Fake 输入和依赖路径预测 UI State，而不只是照着测试结果复述。</p>
+
+  <h2>本课阅读的测试</h2>
+  <p>打开 <code>ForYouViewModelTest.onboardingIsShownWhenNewsResourcesAreLoading()</code>。真实断言逐个构造了三个 <code>FollowableTopic</code>，为了先看清行为，可以把它压缩成下面的等价结构：</p>
+
+  <pre><code>@Test
+fun onboardingIsShownWhenNewsResourcesAreLoading() = runTest {
+    // Arrange：启动两个 stateIn
+    backgroundScope.launch(UnconfinedTestDispatcher()) {
+        viewModel.onboardingUiState.collect()
+    }
+    backgroundScope.launch(UnconfinedTestDispatcher()) {
+        viewModel.feedState.collect()
+    }
+
+    // Act：两个 Fake Repository 都发出首个值
+    topicsRepository.sendTopics(sampleTopics)
+    userDataRepository.setFollowedTopicIds(emptySet())
+
+    // Assert：下面是对真实长断言的结构化表达
+    val expectedTopics = sampleTopics.map { topic -&gt;
+        FollowableTopic(topic = topic, isFollowed = false)
+    }
+    assertEquals(
+        OnboardingUiState.Shown(expectedTopics),
+        viewModel.onboardingUiState.value,
+    )
+    assertEquals(
+        NewsFeedUiState.Success(emptyList()),
+        viewModel.feedState.value,
+    )
+}</code></pre>
+
+  <h2>第一层 combine：生成 FollowableTopic</h2>
+  <p><code>GetFollowableTopicsUseCase</code> 同时需要所有 Topic 和用户关注记录：</p>
+
+  <pre><code>combine(
+    userDataRepository.userData, // Flow&lt;UserData&gt;
+    topicsRepository.getTopics() // Flow&lt;List&lt;Topic&gt;&gt;
+) { userData, topics -&gt;
+    topics.map { topic -&gt;
+        FollowableTopic(
+            topic = topic,
+            isFollowed = topic.id in userData.followedTopics,
+        )
+    }
+}
+// Flow&lt;List&lt;FollowableTopic&gt;&gt;</code></pre>
+
+  <p>测试发出的 <code>followedTopics</code> 是空集合，所以每个 <code>topic.id in emptySet()</code> 都是 <code>false</code>。三个 Topic 因而变成三个 <code>isFollowed = false</code> 的 <code>FollowableTopic</code>。</p>
+
+  <h2>第二层 combine：决定是否显示 Onboarding</h2>
+  <p><code>ForYouViewModel</code> 再组合两个结果：</p>
+
+  <pre><code>combine(
+    shouldShowOnboarding, // Flow&lt;Boolean&gt;
+    getFollowableTopics() // Flow&lt;List&lt;FollowableTopic&gt;&gt;
+) { shouldShow, topics -&gt;
+    if (shouldShow) {
+        OnboardingUiState.Shown(topics)
+    } else {
+        OnboardingUiState.NotShown
+    }
+}
+// Flow&lt;OnboardingUiState&gt;</code></pre>
+
+  <p><code>TestUserDataRepository</code> 的当前数据以 <code>shouldHideOnboarding = false</code> 为基础，因此：</p>
+
+  <pre><code>shouldShowOnboarding
+= !userData.shouldHideOnboarding
+= !false
+= true</code></pre>
+
+  <p>现在第二层 <code>combine</code> 同时得到了 <code>true</code> 和完整的 <code>List&lt;FollowableTopic&gt;</code>，于是产生 <code>OnboardingUiState.Shown(topics)</code>。</p>
+
+  <h2>把两层数据流连起来</h2>
+  <pre><code>topicsRepository ───────────────┐
+                               ├─ combine ─&gt; List&lt;FollowableTopic&gt; ─┐
+userDataRepository ────────────┘                                    │
+                                                                    ├─ combine
+userDataRepository ─&gt; map(!shouldHideOnboarding) ─&gt; Boolean ───────┘
+                                                                    │
+                                                                    ▼
+                                                OnboardingUiState.Shown</code></pre>
+
+  <div class="card">
+    <span class="tag">源码阅读技巧</span>
+    <p>看到嵌套 Flow 时，先给每条边标类型，再判断每个 <code>combine</code> 还缺哪个首个值。复杂链路会立刻变得可追踪。</p>
+  </div>
+
+  <h2>为什么 Feed 仍然是空的 Success</h2>
+  <p>虽然测试没有调用 <code>newsRepository.sendNewsResources()</code>，但用户没有关注任何 Topic。<code>observeAllForFollowedTopics()</code> 会直接产生 <code>emptyList()</code>，无需等待 News Repository，因此 Feed 是“已完成但无内容”的 <code>Success(emptyList())</code>。</p>
+
+  <h2>测试名称与行为不完全一致</h2>
+  <p>函数名写着 <code>NewsResourcesAreLoading</code>，但当前断言期望的是 <code>Success(emptyList())</code>。从当前代码可以判断，测试名可能没有随实现演进同步更新。阅读测试时，名称用于快速定位意图，真正的行为契约仍由输入和断言决定。</p>
+
+  <h2>练习</h2>
+  <p>回到这条测试、<code>GetFollowableTopicsUseCase.kt</code> 和 <code>ForYouViewModel.kt</code>，用自己的话回答：</p>
+  <ol class="checklist">
+    <li>第一层 <code>combine</code> 的两个输入类型和输出类型分别是什么？</li>
+    <li>为什么期望结果中的三个 <code>FollowableTopic.isFollowed</code> 都是 <code>false</code>？</li>
+    <li>如果删除 <code>topicsRepository.sendTopics(sampleTopics)</code>，<code>onboardingUiState.value</code> 会停留在哪个状态？为什么？</li>
+    <li>为什么测试不向 <code>newsRepository</code> 发送数据，<code>feedState</code> 仍能成为 <code>Success(emptyList())</code>？</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/combine.html">Kotlin Flow combine API</a>。速查：<a href="../reference/flow-operators-reading-map.html">Flow 操作符源码阅读速查</a>、<a href="../reference/viewmodel-flow-testing-zh.html">ViewModel 与 Flow 测试速查</a>。上一课：<a href="0012-testing-stateflow-updates-with-fakes.html">用 Fake 驱动 StateFlow 更新</a>。</p>
+
+  <p class="quiet">先完成四道练习。对嵌套 <code>combine</code>、类型变化或测试命名有疑问时，可以直接交给老师；下一课将从“观察状态”转向“调用 ViewModel 事件并验证数据真的被更新”。</p>
+</main>
+</body>
+</html>

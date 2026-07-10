@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 12 课：用 Fake 驱动 StateFlow 更新</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <h1>第 12 课：用 Fake 驱动 StateFlow 更新</h1>
+  <p class="lede">上一课只读取了 <code>stateIn</code> 的初始值。本课让测试依赖主动发出数据，观察两个 UI State 如何产生不同的新状态。</p>
+
+  <h2>第 11 课反馈</h2>
+  <p>四题全部正确。你已经能识别本地 ViewModel 测试、测试依赖、主线程 dispatcher 的替换，以及“读取初始值”和“收集上游更新”的差别。</p>
+
+  <h2>本课只读这一条测试</h2>
+  <pre><code>@Test
+fun onboardingStateIsLoadingWhenTopicsAreLoading() = runTest {
+    backgroundScope.launch(UnconfinedTestDispatcher()) {
+        viewModel.onboardingUiState.collect()
+    }
+    backgroundScope.launch(UnconfinedTestDispatcher()) {
+        viewModel.feedState.collect()
+    }
+
+    userDataRepository.setFollowedTopicIds(emptySet())
+
+    assertEquals(
+        OnboardingUiState.Loading,
+        viewModel.onboardingUiState.value,
+    )
+    assertEquals(
+        NewsFeedUiState.Success(emptyList()),
+        viewModel.feedState.value,
+    )
+}</code></pre>
+
+  <h2>1. 先按 Arrange、Act、Assert 分段</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="tag">Arrange</span>
+      <p>启动两个 collector，让两个使用 <code>WhileSubscribed</code> 的 <code>StateFlow</code> 开始收集各自的上游。</p>
+    </section>
+    <section class="card">
+      <span class="tag">Act</span>
+      <p>调用 Fake Repository 的测试 API，发出“用户没有关注任何 topic”的数据。</p>
+    </section>
+    <section class="card">
+      <span class="tag">Assert</span>
+      <p>读取两个 <code>StateFlow.value</code>，验证当前 UI 状态是否符合预期。</p>
+    </section>
+  </div>
+
+  <h2>2. 为什么要启动两个 collector</h2>
+  <p><code>onboardingUiState</code> 和 <code>feedState</code> 是两个独立调用 <code>stateIn(...WhileSubscribed...)</code> 创建的 <code>StateFlow</code>。订阅其中一个，不会自动订阅另一个。</p>
+
+  <pre><code>collector A ──订阅──&gt; onboardingUiState ──收集──&gt; combine(...)
+
+collector B ──订阅──&gt; feedState       ──收集──&gt; repository Flow</code></pre>
+
+  <p>如果删除 <code>feedState.collect()</code>，那么 <code>feedState</code> 不会开始收集 repository 的新值，读取 <code>feedState.value</code> 时通常仍会得到它的初始值 <code>Loading</code>。</p>
+
+  <h2>3. <code>backgroundScope</code> 和 <code>UnconfinedTestDispatcher</code></h2>
+  <p><code>collect()</code> 会持续等待后续数据，正常情况下不会自行结束。把它放进 <code>backgroundScope</code>，测试主体可以继续执行；测试结束时，这个后台 collector 会被自动取消。</p>
+
+  <p><code>UnconfinedTestDispatcher</code> 让新启动的 collector 立即进入执行，确保下一行 Fake Repository 发出数据之前，订阅已经建立。这里的目的不是模拟真实线程速度，而是让测试执行顺序确定。</p>
+
+  <h2>4. Fake Repository 怎样制造输入</h2>
+  <p><code>TestUserDataRepository</code> 内部使用可由测试控制的 <code>MutableSharedFlow&lt;UserData&gt;</code>：</p>
+  <pre><code>private val _userData = MutableSharedFlow&lt;UserData&gt;(
+    replay = 1,
+    onBufferOverflow = DROP_OLDEST,
+)
+
+suspend fun setFollowedTopicIds(followedTopicIds: Set&lt;String&gt;) {
+    _userData.tryEmit(
+        currentUserData.copy(followedTopics = followedTopicIds),
+    )
+}</code></pre>
+
+  <p>生产环境的 Repository 会读 DataStore、Room 或网络；测试中的 Fake 保持相同接口，却允许测试直接指定下一份数据。这就是 dependency injection 提高可测试性的具体收益。</p>
+
+  <h2>5. 为什么两个最终状态不同</h2>
+  <p>测试只向 <code>userDataRepository</code> 发出了数据，没有向 <code>topicsRepository</code> 发出 topics。</p>
+
+  <div class="path">
+    <h3><code>feedState</code> 路径</h3>
+    <pre><code>followedTopics = emptySet()
+  → observeAllForFollowedTopics()
+  → 没有关注的 topic，直接产生 emptyList()
+  → map(NewsFeedUiState::Success)
+  → Success(emptyList())</code></pre>
+  </div>
+
+  <div class="path">
+    <h3><code>onboardingUiState</code> 路径</h3>
+    <pre><code>userData 已经发出
+topicsRepository 仍未发出 topics
+  → combine(shouldShowOnboarding, getFollowableTopics())
+    还缺少第二个上游的首个值
+  → 没有产生新的 OnboardingUiState
+  → 保持 initialValue = Loading</code></pre>
+  </div>
+
+  <div class="card">
+    <span class="tag">关键结论</span>
+    <p><code>combine</code> 必须等每个上游都至少发出一个值，才能执行 transformation；但 <code>feedState</code> 的链路不依赖 <code>topicsRepository</code>，所以它已经可以完成。</p>
+  </div>
+
+  <h2>练习</h2>
+  <p>回到 <code>ForYouViewModelTest.onboardingStateIsLoadingWhenTopicsAreLoading()</code>，用自己的话回答：</p>
+  <ol class="checklist">
+    <li>为什么测试需要分别 collect <code>onboardingUiState</code> 和 <code>feedState</code>？</li>
+    <li>如果删除 <code>viewModel.feedState.collect()</code>，最后的 <code>feedState.value</code> 很可能是什么？为什么？</li>
+    <li>为什么只发送空的 followed topic 后，Feed 已经是 <code>Success(emptyList())</code>，Onboarding 却仍是 <code>Loading</code>？</li>
+    <li>请指出这条测试的 Arrange、Act、Assert 分别是哪几段代码。</li>
+  </ol>
+
+  <h2>主要阅读</h2>
+  <p>主资源：<a href="https://developer.android.com/kotlin/flow/test#statein">Android Developers：Working with StateFlows created by stateIn</a>。速查：<a href="../reference/viewmodel-flow-testing-zh.html">ViewModel 与 Flow 测试速查</a>。上一课：<a href="0011-first-viewmodel-state-test.html">读懂第一条 ViewModel 状态测试</a>。</p>
+
+  <p class="quiet">先完成四道练习。对 <code>backgroundScope</code>、<code>UnconfinedTestDispatcher</code>、Fake 或 <code>combine</code> 有疑问时，可以把具体疑问交给老师；下一课将继续让 topics 和 user data 都发出数据，验证完整的 Onboarding 状态。</p>
+</main>
+</body>
+</html>
