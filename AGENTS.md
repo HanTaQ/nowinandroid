@@ -21,6 +21,21 @@ This project is a modern Android application that follows the official architect
 
 The main Android app lives in the `app/` folder. Feature modules live in `feature/` and core and shared modules in `core/`.
 
+## Learning Materials
+
+The `learn/` directory is a local learning workspace for studying this codebase, especially with
+the `teach` Skill when it is available. It is not part of the production app architecture.
+
+- `learn/MISSION.md` defines the learning goals and constraints.
+- `learn/NOTES.md` contains teaching preferences and context for future AI sessions.
+- `learn/RESOURCES.md` indexes official docs and project-specific learning references.
+- `learn/lessons/` contains lesson pages for guided source-code reading.
+- `learn/learning-records/` stores progress notes and known knowledge gaps.
+- `learn/reference/` contains quick-reference maps for topics such as Compose, Flow, and testing.
+
+When the user asks to learn from the codebase, continue an existing lesson, or use the `teach`
+Skill, inspect the relevant files under `learn/` first and use them as the teaching context.
+
 ## Commands to Build & Test
 
 The app and Android libraries have two product flavors: `demo` and `prod`, and two build types: `debug` and `release`.
